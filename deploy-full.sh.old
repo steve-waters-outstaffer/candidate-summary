@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# Full deployment script for Candidate Summary AI
+echo "🚀 Deploying Candidate Summary AI..."
+
+PROJECT_ID="candidate-summary-ai"
+SERVICE_NAME="candidate-summary-api"
+REGION="us-central1"
+
+# Deploy backend to Cloud Run
+echo "📦 Building and deploying backend..."
+cd backend
+gcloud builds submit --tag gcr.io/$PROJECT_ID/$SERVICE_NAME .
+
+gcloud run deploy $SERVICE_NAME \
+  --image gcr.io/$PROJECT_ID/$SERVICE_NAME \
+  --platform managed \
+  --region $REGION \
+  --allow-unauthenticated \
+  --memory 1Gi \
+  --cpu 1 \
+  --set-env-vars FLASK_ENV=production
+
+cd ..
+
+# Get the backend URL
+BACKEND_URL=$(gcloud run services describe $SERVICE_NAME --region=$REGION --format="value(status.url)")
+echo "✅ Backend deployed at: $BACKEND_URL"
+
+# Update frontend environment
+echo "🔧 Updating frontend environment..."
+echo "VITE_API_URL=$BACKEND_URL" > .env
+
+# Build and deploy frontend
+echo "🌐 Building and deploying frontend..."
+npm run build
+firebase deploy --only hosting
+
+echo ""
+echo "🎉 Deployment complete!"
+echo "Frontend: https://$PROJECT_ID.web.app"
+echo "Backend:  $BACKEND_URL"
+echo ""
+echo "Don't forget to set your API keys in Cloud Run environment variables!"

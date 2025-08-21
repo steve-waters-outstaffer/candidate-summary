@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Deployment script for Google Cloud Run
+# Make sure you have gcloud CLI installed and authenticated
+
+PROJECT_ID="candidate-summary-ai"
+SERVICE_NAME="candidate-summary-api"
+REGION="us-central1"
+
+echo "Building and deploying Candidate Summary API to Cloud Run..."
+
+# Build and push to Container Registry
+gcloud builds submit --tag gcr.io/$PROJECT_ID/$SERVICE_NAME ./backend
+
+# Deploy to Cloud Run
+gcloud run deploy $SERVICE_NAME \
+  --image gcr.io/$PROJECT_ID/$SERVICE_NAME \
+  --platform managed \
+  --region $REGION \
+  --allow-unauthenticated \
+  --memory 1Gi \
+  --cpu 1 \
+  --set-env-vars FLASK_ENV=production \
+  --set-env-vars GOOGLE_API_KEY=$GOOGLE_API_KEY \
+  --set-env-vars RECRUITCRM_API_KEY=$RECRUITCRM_API_KEY \
+  --set-env-vars ALPHARUN_API_KEY=$ALPHARUN_API_KEY
+
+echo "Deployment complete! 🚀"
+echo "Your API is available at: https://$SERVICE_NAME-$REGION-$PROJECT_ID.cloudfunctions.net"
+echo "Update your frontend .env with: VITE_API_URL=https://$SERVICE_NAME-$REGION-$PROJECT_ID.cloudfunctions.net"
