@@ -31,7 +31,7 @@ const Dashboard = () => {
         <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: CustomColors.UIGrey100 }}>
             <AppBar position="static" color="secondary">
                 <Toolbar>
-                    <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+                    <Typography color="default" variant="h6" component="div" sx={{ flexGrow: 1 }}>
                         Ai Candidate Summary
                     </Typography>
                     <Typography variant="bodySmall" sx={{ mr: 2 }}>

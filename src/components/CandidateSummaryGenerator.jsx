@@ -504,7 +504,7 @@ const CandidateSummaryGenerator = () => {
                                         color="primary"
                                     />
                                 }
-                                label="Generate Anonymous Summary"
+                                label="Anonymous Reverse Sales Summary"
                                 sx={{ mb: Spacing.Large, display: 'block' }}
                             />
 
