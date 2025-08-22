@@ -412,6 +412,40 @@ def test_fireflies():
         })
     return jsonify({'error': 'Failed to fetch transcript data from Fireflies.ai'}), 404
 
+# In backend/app.py
+
+@app.route('/api/test-resume', methods=['POST'])
+def test_resume():
+    """Checks for the presence of a resume in the candidate data."""
+    app.logger.info("\n--- Endpoint Hit: /api/test-resume ---")
+    data = request.get_json()
+    candidate_slug = data.get('candidate_slug')
+
+    if not candidate_slug:
+        return jsonify({'error': 'Missing candidate_slug'}), 400
+
+    # We fetch the full candidate record just like the main function does
+    candidate_data = fetch_recruitcrm_candidate(candidate_slug)
+
+    if candidate_data:
+        candidate_details = candidate_data.get('data', candidate_data)
+        resume_info = candidate_details.get('resume')
+
+        if resume_info and resume_info.get('filename'):
+            return jsonify({
+                'success': True,
+                'message': 'Resume Found',
+                'resume_name': resume_info.get('filename')
+            })
+        else:
+            # It's not an error if there's no resume, just a different status
+            return jsonify({
+                'success': False, # Use success: false to indicate 'not found'
+                'message': 'No resume on file for this candidate.'
+            })
+
+    return jsonify({'error': 'Failed to fetch candidate data to check for resume'}), 404
+
 
 @app.route('/api/generate-summary', methods=['POST'])
 def generate_summary():

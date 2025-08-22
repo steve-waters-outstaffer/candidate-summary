@@ -21,11 +21,15 @@ def get_available_prompts():
                         data = json.load(f)
                         prompts.append({
                             'id': prompt_id,
-                            'name': data.get('name', prompt_id)
+                            'name': data.get('name', prompt_id),
+                            # --- CHANGE 1: Read the sort_order key ---
+                            'sort_order': data.get('sort_order', 999) # Defaults to 999 if key is missing
                         })
                 except Exception as e:
                     logging.error(f"Error loading prompt {file}: {e}")
-    return sorted(prompts, key=lambda p: p['name'])
+
+    # --- CHANGE 2: Sort by the new 'sort_order' key ---
+    return sorted(prompts, key=lambda p: p['sort_order'])
 
 def get_prompt(prompt_type="recruitment.detailed"):
     """Retrieve a specific prompt configuration from its JSON file."""
