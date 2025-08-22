@@ -74,6 +74,8 @@ const CandidateSummaryGenerator = () => {
     const [alert, setAlert] = useState({ show: false, type: 'info', message: '' });
     const [view, setView] = useState('preview');
     const [includeFireflies, setIncludeFireflies] = useState(false);
+    const [proceedWithoutInterview, setProceedWithoutInterview] = useState(false);
+
 
     const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
     const [showFeedbackComment, setShowFeedbackComment] = useState(false);
@@ -143,7 +145,7 @@ const CandidateSummaryGenerator = () => {
             setApiStatus(prev => ({ ...prev, [apiType]: { status: 'error', message: `Network error: ${error.message}`, data: null } }));
         }
     };
-    
+
     const handleParseAndConfirm = () => {
         if (!recruitCrmUrl) {
             showAlert('error', 'Please paste the RecruitCRM URL first.');
@@ -171,7 +173,7 @@ const CandidateSummaryGenerator = () => {
             showAlert('error', 'Could not parse the URL. Please check the format and try again.');
         }
     };
-    
+
     const handleFirefliesConfirm = () => {
         if (!firefliesUrl) {
             showAlert('error', 'Please paste the Fireflies URL first.');
@@ -204,6 +206,7 @@ const CandidateSummaryGenerator = () => {
         setShowFeedbackComment(false);
         setFeedbackComment('');
         setIncludeFireflies(false);
+        setProceedWithoutInterview(false);
     };
 
     const getStatusIcon = (status) => {
@@ -223,7 +226,7 @@ const CandidateSummaryGenerator = () => {
             default: return CustomColors.UIGrey500;
         }
     };
-    
+
     const showAlert = (type, message) => {
         setAlert({ show: true, type, message });
         setTimeout(() => setAlert({ show: false, type: 'info', message: '' }), 5000);
@@ -236,9 +239,12 @@ const CandidateSummaryGenerator = () => {
 
     const generateSummary = async () => {
         if (!API_BASE_URL) return;
-        const baseApisSuccess = apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success' && apiStatus.interview.status === 'success';
+
+        const baseApisSuccess = apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success';
+        const interviewApiSuccess = apiStatus.interview.status === 'success' || proceedWithoutInterview;
         const firefliesApiSuccess = !includeFireflies || apiStatus.fireflies.status === 'success';
-        if (!baseApisSuccess || !firefliesApiSuccess) {
+
+        if (!baseApisSuccess || !interviewApiSuccess || !firefliesApiSuccess) {
             showAlert('error', 'Please ensure all required details are confirmed successfully.');
             return;
         }
@@ -254,6 +260,10 @@ const CandidateSummaryGenerator = () => {
             const payload = { ...formData, prompt_type: selectedPrompt };
             if (!includeFireflies) {
                 delete payload.fireflies_url;
+            }
+            if (proceedWithoutInterview) {
+                delete payload.interview_id;
+                delete payload.alpharun_job_id;
             }
             const response = await fetch(`${API_BASE_URL}/api/generate-summary`, {
                 method: 'POST',
@@ -306,7 +316,7 @@ const CandidateSummaryGenerator = () => {
             setPushing(false);
         }
     };
-    
+
     const handleFeedbackSubmit = async (rating) => {
         if (!API_BASE_URL) return;
         const payload = {
@@ -339,8 +349,16 @@ const CandidateSummaryGenerator = () => {
     const handleViewChange = (event, newValue) => {
         setView(newValue);
     };
-    
-    const isGenerateDisabled = loading || !(apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success' && apiStatus.interview.status === 'success' && (!includeFireflies || apiStatus.fireflies.status === 'success'));
+
+    const isGenerateDisabled = loading ||
+        !(apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success') ||
+        !(apiStatus.interview.status === 'success' || proceedWithoutInterview) ||
+        !(!includeFireflies || apiStatus.fireflies.status === 'success');
+
+    const showProceedWithoutInterviewSwitch = apiStatus.candidate.status !== 'pending' &&
+        apiStatus.job.status !== 'pending' &&
+        apiStatus.interview.status !== 'success' &&
+        apiStatus.interview.status !== 'loading';
 
     return (
         <Box sx={{mx: 'auto', p: Spacing.Large }}>
@@ -356,11 +374,20 @@ const CandidateSummaryGenerator = () => {
                                 <Button fullWidth variant="outlined" onClick={handleParseAndConfirm} disabled={!recruitCrmUrl}>Parse URL & Confirm Details</Button>
                             </Box>
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: Spacing.Medium, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Job:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.job.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.job.status) }}>{apiStatus.job.data?.job_name || apiStatus.job.message || 'Pending URL Parse'}</Typography></Box></Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Candidate:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.candidate.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.candidate.status) }}>{apiStatus.candidate.data?.candidate_name || apiStatus.candidate.message || 'Pending URL Parse'}</Typography></Box></Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Interview:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.interview.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.interview.status) }}>{ (apiStatus.interview.data?.candidate_name && `Confirmed: ${apiStatus.interview.data.candidate_name}`) || apiStatus.interview.message || 'Pending IDs'}</Typography></Box></Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Resume:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.resume.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.resume.status) }}>{apiStatus.resume.data?.resume_name || apiStatus.resume.message || 'Pending Candidate'}</Typography></Box></Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Job Description:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.job.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.job.status) }}>{apiStatus.job.data?.job_name || apiStatus.job.message || 'Pending URL Parse'}</Typography></Box></Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Candidate Profile:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.candidate.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.candidate.status) }}>{apiStatus.candidate.data?.candidate_name || apiStatus.candidate.message || 'Pending URL Parse'}</Typography></Box></Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Anna Ai Interview:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.interview.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.interview.status) }}>{ (apiStatus.interview.data?.candidate_name && `Confirmed: ${apiStatus.interview.data.candidate_name}`) || apiStatus.interview.message || 'Pending IDs'}</Typography></Box></Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Candidate Resume:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.resume.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.resume.status) }}>{apiStatus.resume.data?.resume_name || apiStatus.resume.message || 'Pending Candidate'}</Typography></Box></Box>
                             </Box>
+
+                            {showProceedWithoutInterviewSwitch && (
+                                <FormControlLabel
+                                    control={<Switch checked={proceedWithoutInterview} onChange={(e) => setProceedWithoutInterview(e.target.checked)} name="proceedWithoutInterview" />}
+                                    label="Proceed without Anna AI Interview"
+                                    sx={{ mb: Spacing.Small }}
+                                />
+                            )}
+
                             <Divider sx={{ my: Spacing.Medium }} />
                             <FormControlLabel control={<Switch checked={includeFireflies} onChange={(e) => setIncludeFireflies(e.target.checked)} name="includeFireflies" />} label="Include Fireflies.ai Transcript" sx={{ mb: Spacing.Small }} />
                             <Collapse in={includeFireflies}>

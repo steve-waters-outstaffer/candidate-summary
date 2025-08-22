@@ -449,7 +449,7 @@ def test_resume():
 
 @app.route('/api/generate-summary', methods=['POST'])
 def generate_summary():
-    """Generate candidate summary, optionally including Fireflies data."""
+    """Generate candidate summary, optionally including Fireflies and interview data."""
     app.logger.info("\n--- Endpoint Hit: /api/generate-summary ---")
     try:
         data = request.get_json()
@@ -457,16 +457,23 @@ def generate_summary():
         job_slug = data.get('job_slug')
         alpharun_job_id = data.get('alpharun_job_id')
         interview_id = data.get('interview_id')
-        fireflies_url = data.get('fireflies_url') # Optional
+        fireflies_url = data.get('fireflies_url')  # Optional
         additional_context = data.get('additional_context', '')
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
 
-        if not all([candidate_slug, job_slug, interview_id, alpharun_job_id]):
-            return jsonify({'error': 'Missing required RecruitCRM/AlphaRun fields'}), 400
+        if not all([candidate_slug, job_slug]):
+            return jsonify({'error': 'Missing required RecruitCRM fields'}), 400
 
         candidate_data = fetch_recruitcrm_candidate(candidate_slug)
         job_data = fetch_recruitcrm_job(job_slug)
-        interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+
+        interview_data = None
+        if alpharun_job_id and interview_id:
+            interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+            if not interview_data:
+                app.logger.warning("!!! WARNING: Failed to fetch interview data, proceeding without it.")
+        else:
+            app.logger.info("LOG: No interview ID or AlphaRun job ID provided, proceeding without interview data.")
 
         # --- CORRECTED: Resume Handling Logic ---
         gemini_resume_file = None
@@ -493,9 +500,8 @@ def generate_summary():
             else:
                 app.logger.warning("!!! WARNING: Invalid Fireflies URL, proceeding without it.")
 
-
-        if not all([candidate_data, job_data, interview_data]):
-            missing = [name for name, d in [("candidate", candidate_data), ("job", job_data), ("interview", interview_data)] if not d]
+        if not all([candidate_data, job_data]):
+            missing = [name for name, d in [("candidate", candidate_data), ("job", job_data)] if not d]
             return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}'}), 500
 
         html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file)
