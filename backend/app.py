@@ -10,7 +10,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import google.generativeai as genai
 from google.cloud import firestore
-from config.prompts import build_full_prompt
+from config.prompts import build_full_prompt, get_available_prompts
 from urllib.parse import urlparse
 
 # ==============================================================================
@@ -308,6 +308,17 @@ def health_check():
     """A simple health check endpoint to confirm the server is running."""
     app.logger.info("LOG: Health check endpoint was hit.")
     return jsonify({'status': 'healthy'}), 200
+
+@app.route('/api/prompts', methods=['GET'])
+def list_prompts():
+    """Returns a list of available prompt configurations."""
+    app.logger.info("\n--- Endpoint Hit: /api/prompts ---")
+    try:
+        prompts = get_available_prompts()
+        return jsonify(prompts), 200
+    except Exception as e:
+        app.logger.error(f"!!! EXCEPTION in list_prompts: {e}")
+        return jsonify({'error': 'Could not retrieve prompt list from server'}), 500
 
 @app.route('/api/test-candidate', methods=['POST'])
 def test_candidate():
