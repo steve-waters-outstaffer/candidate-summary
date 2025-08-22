@@ -3,6 +3,8 @@ import re
 import requests
 import logging
 import datetime
+import io
+import mimetypes  # <-- New import
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -79,45 +81,6 @@ except Exception as e:
 # ==============================================================================
 # 2. EXTERNAL API HELPER FUNCTIONS
 # ==============================================================================
-
-# --- NEW HELPER FUNCTION FOR RESUME HANDLING ---
-def upload_resume_to_gemini(resume_data: dict) -> dict | None:
-    """
-    Downloads a resume from RecruitCRM and uploads it to the Gemini File API.
-    Returns the file object from the Gemini API if successful.
-    """
-    if not resume_data or 'file_link' not in resume_data or 'filename' not in resume_data:
-        app.logger.info("LOG: No valid resume data provided.")
-        return None
-
-    file_link = resume_data['file_link']
-    filename = resume_data['filename']
-    app.logger.info(f"LOG: Attempting to process resume: {filename}")
-
-    try:
-        # 1. Download the resume file from RecruitCRM
-        response = requests.get(file_link, timeout=30)
-        response.raise_for_status()
-        resume_bytes = response.content
-        app.logger.info(f"LOG: Successfully downloaded {filename} from RecruitCRM.")
-
-        # 2. Upload the file content to the Gemini File API
-        gemini_file = genai.upload_file(
-            path=io.BytesIO(resume_bytes),
-            display_name=filename
-        )
-        app.logger.info(f"LOG: Successfully uploaded resume to Gemini. URI: {gemini_file.uri}")
-
-        return gemini_file
-
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during resume download: {e}")
-        return None
-    except Exception as e:
-        app.logger.error(f"!!! EXCEPTION during resume upload to Gemini: {e}")
-        return None
-# --- END OF NEW HELPER FUNCTION ---
-
 
 def get_recruitcrm_headers():
     """Returns the authorization headers for RecruitCRM."""
@@ -255,11 +218,58 @@ def normalise_fireflies_transcript(tr: dict) -> dict:
 # --- END: Fireflies.ai Helper Functions ---
 
 
+# --- CORRECTED HELPER FUNCTION FOR RESUME HANDLING ---
+def upload_resume_to_gemini(resume_data: dict) -> dict | None:
+    """
+    Downloads a resume from RecruitCRM and uploads it to the Gemini File API.
+    Returns the file object from the Gemini API if successful.
+    """
+    if not resume_data or 'file_link' not in resume_data or 'filename' not in resume_data:
+        app.logger.info("LOG: No valid resume data provided.")
+        return None
+
+    file_link = resume_data['file_link']
+    filename = resume_data['filename']
+    app.logger.info(f"LOG: Attempting to process resume: {filename}")
+
+    # --- FIX: Determine the mime type from the filename ---
+    mime_type, _ = mimetypes.guess_type(filename)
+    if not mime_type:
+        # Provide a default or handle the case where the type is unknown
+        mime_type = 'application/octet-stream' # A generic binary type
+        app.logger.warning(f"Could not determine mime type for {filename}, using default: {mime_type}")
+
+
+    try:
+        # 1. Download the resume file from RecruitCRM
+        response = requests.get(file_link, timeout=30)
+        response.raise_for_status()
+        resume_bytes = response.content
+        app.logger.info(f"LOG: Successfully downloaded {filename} from RecruitCRM.")
+
+        # 2. Upload the file content to the Gemini File API with the mime_type
+        gemini_file = genai.upload_file(
+            path=io.BytesIO(resume_bytes),
+            display_name=filename,
+            mime_type=mime_type  # <-- This is the required fix
+        )
+        app.logger.info(f"LOG: Successfully uploaded resume to Gemini. URI: {gemini_file.uri}")
+
+        return gemini_file
+
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"!!! EXCEPTION during resume download: {e}")
+        return None
+    except Exception as e:
+        app.logger.error(f"!!! EXCEPTION during resume upload to Gemini: {e}")
+        return None
+# --- END OF CORRECTED HELPER FUNCTION ---
+
+
 def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data=None, gemini_resume_file=None):
     """Generate HTML summary using Google Gemini and clean the response."""
     app.logger.info(f"LOG: Generating HTML summary with Gemini using prompt type: {prompt_type}")
 
-    # Build the text part of the prompt
     prompt_text = build_full_prompt(
         prompt_type=prompt_type,
         candidate_data=candidate_data,
@@ -269,16 +279,13 @@ def generate_html_summary(candidate_data, job_data, interview_data, additional_c
         fireflies_data=fireflies_data
     )
 
-    # Create a list of contents to send to the model
     prompt_contents = [prompt_text]
 
-    # If the resume was successfully uploaded, append the file object to the contents
     if gemini_resume_file:
         prompt_contents.append(gemini_resume_file)
         app.logger.info("LOG: Appending resume file to Gemini prompt.")
 
     try:
-        # Pass the entire list of contents (text and file) to the model
         response = model.generate_content(prompt_contents)
         raw_html = response.text
         app.logger.info("LOG: Cleaning Gemini response.")
@@ -397,7 +404,7 @@ def test_fireflies():
 
 @app.route('/api/generate-summary', methods=['POST'])
 def generate_summary():
-    """Generate candidate summary, optionally including Fireflies and Resume data."""
+    """Generate candidate summary, optionally including Fireflies data."""
     app.logger.info("\n--- Endpoint Hit: /api/generate-summary ---")
     try:
         data = request.get_json()
@@ -416,10 +423,12 @@ def generate_summary():
         job_data = fetch_recruitcrm_job(job_slug)
         interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
 
-        # --- NEW: Resume Handling Logic ---
+        # --- CORRECTED: Resume Handling Logic ---
         gemini_resume_file = None
-        if candidate_data and 'data' in candidate_data:
-            resume_info = candidate_data['data'].get('resume')
+        if candidate_data:
+            # Safely access the nested 'data' object
+            candidate_details = candidate_data.get('data', candidate_data)
+            resume_info = candidate_details.get('resume')
             if resume_info:
                 # This function will handle download and upload, returning None on failure
                 gemini_resume_file = upload_resume_to_gemini(resume_info)
@@ -444,16 +453,7 @@ def generate_summary():
             missing = [name for name, d in [("candidate", candidate_data), ("job", job_data), ("interview", interview_data)] if not d]
             return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}'}), 500
 
-        # --- MODIFIED: Pass the new gemini_resume_file to the summary function ---
-        html_summary = generate_html_summary(
-            candidate_data,
-            job_data,
-            interview_data,
-            additional_context,
-            prompt_type,
-            fireflies_data,
-            gemini_resume_file  # Pass the file object here
-        )
+        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file)
 
         if html_summary:
             return jsonify({'success': True, 'html_summary': html_summary, 'candidate_slug': candidate_slug})
@@ -517,6 +517,7 @@ def log_feedback():
     except Exception as e:
         app.logger.error(f"!!! EXCEPTION in log_feedback: {e}")
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+
 # ==============================================================================
 # 4. MAIN EXECUTION BLOCK
 # ==============================================================================
