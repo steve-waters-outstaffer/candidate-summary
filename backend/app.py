@@ -5,6 +5,7 @@ import logging
 import datetime
 import io
 import mimetypes  # <-- New import
+from file_converter import convert_to_supported_format, UnsupportedFileTypeError
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -219,9 +220,11 @@ def normalise_fireflies_transcript(tr: dict) -> dict:
 
 
 # --- CORRECTED HELPER FUNCTION FOR RESUME HANDLING ---
+# --- UPDATED HELPER FUNCTION FOR RESUME HANDLING ---
 def upload_resume_to_gemini(resume_data: dict) -> dict | None:
     """
-    Downloads a resume from RecruitCRM and uploads it to the Gemini File API.
+    Downloads a resume, converts it to a supported format if necessary,
+    and uploads it to the Gemini File API.
     Returns the file object from the Gemini API if successful.
     """
     if not resume_data or 'file_link' not in resume_data or 'filename' not in resume_data:
@@ -232,14 +235,6 @@ def upload_resume_to_gemini(resume_data: dict) -> dict | None:
     filename = resume_data['filename']
     app.logger.info(f"LOG: Attempting to process resume: {filename}")
 
-    # --- FIX: Determine the mime type from the filename ---
-    mime_type, _ = mimetypes.guess_type(filename)
-    if not mime_type:
-        # Provide a default or handle the case where the type is unknown
-        mime_type = 'application/octet-stream' # A generic binary type
-        app.logger.warning(f"Could not determine mime type for {filename}, using default: {mime_type}")
-
-
     try:
         # 1. Download the resume file from RecruitCRM
         response = requests.get(file_link, timeout=30)
@@ -247,11 +242,24 @@ def upload_resume_to_gemini(resume_data: dict) -> dict | None:
         resume_bytes = response.content
         app.logger.info(f"LOG: Successfully downloaded {filename} from RecruitCRM.")
 
-        # 2. Upload the file content to the Gemini File API with the mime_type
+        # 2. Convert the file to a supported format (e.g., text/plain) if needed
+        try:
+            converted_bytes, supported_mime_type = convert_to_supported_format(
+                file_bytes=resume_bytes,
+                original_filename=filename
+            )
+            app.logger.info(f"LOG: File '{filename}' processed for upload with MIME type '{supported_mime_type}'.")
+        except UnsupportedFileTypeError as e:
+            # Log a warning but don't crash the whole process.
+            # The summary generation will proceed without the resume.
+            app.logger.warning(f"!!! WARNING: Could not process resume. {e}")
+            return None
+
+        # 3. Upload the processed file content to the Gemini File API
         gemini_file = genai.upload_file(
-            path=io.BytesIO(resume_bytes),
+            path=io.BytesIO(converted_bytes),
             display_name=filename,
-            mime_type=mime_type  # <-- This is the required fix
+            mime_type=supported_mime_type # <-- Use the new supported mime type
         )
         app.logger.info(f"LOG: Successfully uploaded resume to Gemini. URI: {gemini_file.uri}")
 
@@ -261,9 +269,9 @@ def upload_resume_to_gemini(resume_data: dict) -> dict | None:
         app.logger.error(f"!!! EXCEPTION during resume download: {e}")
         return None
     except Exception as e:
+        # This will catch errors from the Gemini API upload itself
         app.logger.error(f"!!! EXCEPTION during resume upload to Gemini: {e}")
         return None
-# --- END OF CORRECTED HELPER FUNCTION ---
 
 
 def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data=None, gemini_resume_file=None):
