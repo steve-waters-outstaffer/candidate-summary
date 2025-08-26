@@ -8,6 +8,7 @@ PROJECT_ID="candidate-summary-ai"
 SERVICE_NAME="candidate-summary-api"
 REGION="us-central1"  # Change if you prefer different region
 IMAGE_NAME="gcr.io/$PROJECT_ID/$SERVICE_NAME"
+ACCOUNT_EMAIL="steve.waters@outstaffer.com"
 
 echo "🚀 Starting deployment..."
 
@@ -18,6 +19,16 @@ if [ -f .env ]; then
 else
     echo "❌ .env file not found!"
     exit 1
+fi
+
+# Set the correct Google account
+echo "🔐 Setting Google account to $ACCOUNT_EMAIL..."
+gcloud config set account $ACCOUNT_EMAIL
+
+# Check if we need to authenticate
+if ! gcloud auth list --filter="status:ACTIVE" --format="value(account)" | grep -q "$ACCOUNT_EMAIL"; then
+    echo "🔑 Account not authenticated. Running gcloud auth login..."
+    gcloud auth login $ACCOUNT_EMAIL
 fi
 
 # Set the project
