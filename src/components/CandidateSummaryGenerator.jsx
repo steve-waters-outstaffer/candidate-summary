@@ -361,8 +361,7 @@ const CandidateSummaryGenerator = () => {
         apiStatus.interview.status !== 'loading';
 
     return (
-        <Box sx={{mx: 'auto', p: Spacing.Large }}>
-            <Typography variant="h2" sx={{ mb: Spacing.Large, color: CustomColors.MidnightBlue }}>Candidate Summary Generator</Typography>
+        <Box>
             {alert.show && <Alert severity={alert.type} sx={{ mb: Spacing.Medium }}>{alert.message}</Alert>}
             <Grid container spacing={Spacing.Large}>
                 <Grid item xs={12} md={5}>

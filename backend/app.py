@@ -322,7 +322,8 @@ def list_prompts():
     """Returns a list of available prompt configurations."""
     app.logger.info("\n--- Endpoint Hit: /api/prompts ---")
     try:
-        prompts = get_available_prompts()
+        category = request.args.get('category', 'single')  # Default to single
+        prompts = get_available_prompts(category)
         return jsonify(prompts), 200
     except Exception as e:
         app.logger.error(f"!!! EXCEPTION in list_prompts: {e}")
@@ -343,7 +344,9 @@ def test_candidate():
         interview_id = None
         for field in candidate_details.get('custom_fields', []):
             if isinstance(field, dict) and field.get('field_name') == 'AI Interview ID':
-                interview_id = field.get('value')
+                raw_interview_id = field.get('value')
+                if raw_interview_id:
+                    interview_id = raw_interview_id.split('?')[0]
                 break
         return jsonify({
             'success': True,
@@ -383,10 +386,13 @@ def test_interview():
     """Tests the connection to the AlphaRun interview API."""
     app.logger.info("\n--- Endpoint Hit: /api/test-interview ---")
     data = request.get_json()
-    interview_id = data.get('interview_id')
+    raw_interview_id = data.get('interview_id')
     job_opening_id = data.get('alpharun_job_id')
-    if not interview_id or not job_opening_id:
+    if not raw_interview_id or not job_opening_id:
         return jsonify({'error': 'Missing interview_id or alpharun_job_id'}), 400
+
+    # Clean interview ID by removing URL parameters
+    interview_id = raw_interview_id.split('?')[0]
 
     interview_data = fetch_alpharun_interview(job_opening_id, interview_id)
     if interview_data:
@@ -464,10 +470,15 @@ def generate_summary():
         candidate_slug = data.get('candidate_slug')
         job_slug = data.get('job_slug')
         alpharun_job_id = data.get('alpharun_job_id')
-        interview_id = data.get('interview_id')
+        raw_interview_id = data.get('interview_id')
         fireflies_url = data.get('fireflies_url')  # Optional
         additional_context = data.get('additional_context', '')
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
+
+        # Clean interview ID by removing URL parameters
+        interview_id = None
+        if raw_interview_id:
+            interview_id = raw_interview_id.split('?')[0]
 
         if not all([candidate_slug, job_slug]):
             return jsonify({'error': 'Missing required RecruitCRM fields'}), 400
@@ -550,6 +561,143 @@ def push_to_recruitcrm():
     except Exception as e:
         app.logger.error(f"!!! TOP-LEVEL EXCEPTION in push_to_recruitcrm: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/generate-multiple-candidates', methods=['POST'])
+def generate_multiple_candidates():
+    """Generates content for multiple candidates using multiple-candidates-prompts."""
+    app.logger.info("\n--- Endpoint Hit: /api/generate-multiple-candidates ---")
+    
+    try:
+        data = request.get_json()
+        
+        # Extract request data
+        candidate_urls = data.get('candidate_urls', [])
+        prompt_type = data.get('prompt_type', 'candidate-submission')
+        client_name = data.get('client_name', '')
+        job_url = data.get('job_url', '')
+        preferred_candidate = data.get('preferred_candidate', '')
+        additional_context = data.get('additional_context', '')
+        
+        # Validate input
+        if not candidate_urls or len(candidate_urls) == 0:
+            return jsonify({'error': 'At least one candidate URL is required'}), 400
+        
+        if len(candidate_urls) > 10:  # Safety limit
+            return jsonify({'error': 'Maximum 10 candidates allowed'}), 400
+        
+        app.logger.info(f"Processing {len(candidate_urls)} candidates with prompt type: {prompt_type}")
+        
+        # Fetch job description if job_url provided
+        job_data = None
+        if job_url:
+            try:
+                app.logger.info(f"Fetching job description from: {job_url}")
+                job_slug = job_url.split('/')[-1] if '/' in job_url else job_url
+                job_response = fetch_recruitcrm_job(job_slug)
+                if job_response:
+                    job_data = job_response
+                    app.logger.info("Successfully fetched job description")
+                else:
+                    app.logger.warning("Failed to fetch job description")
+            except Exception as e:
+                app.logger.error(f"Error fetching job description: {e}")
+        
+        # Process each candidate sequentially
+        candidates_data = []
+        failed_candidates = []
+        
+        for i, url in enumerate(candidate_urls):
+            try:
+                app.logger.info(f"Fetching candidate {i+1}/{len(candidate_urls)}: {url}")
+                
+                # Extract slug from URL (reuse existing logic)
+                slug = url.split('/')[-1] if '/' in url else url
+                
+                # Fetch candidate data
+                candidate_data = fetch_recruitcrm_candidate(slug)
+                if candidate_data:
+                    candidates_data.append(candidate_data)
+                    app.logger.info(f"Successfully fetched candidate {i+1}")
+                else:
+                    failed_candidates.append(url)
+                    app.logger.warning(f"Failed to fetch candidate {i+1}: {url}")
+                    
+            except Exception as e:
+                app.logger.error(f"Error processing candidate {i+1}: {e}")
+                failed_candidates.append(url)
+        
+        if not candidates_data:
+            return jsonify({'error': 'No valid candidate data could be retrieved'}), 400
+        
+        # Prepare data for prompt generation
+        formatted_candidates_data = ""
+        for i, candidate in enumerate(candidates_data):
+            candidate_details = candidate.get('data', candidate)
+            formatted_candidates_data += f"\n**CANDIDATE {i+1}:**\n"
+            formatted_candidates_data += f"Name: {candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}\n"
+            formatted_candidates_data += f"Email: {candidate_details.get('email', '')}\n"
+            formatted_candidates_data += f"Phone: {candidate_details.get('mobile_phone', '')}\n"
+            
+            # Add custom fields
+            for field in candidate_details.get('custom_fields', []):
+                if isinstance(field, dict) and field.get('value'):
+                    formatted_candidates_data += f"{field.get('field_name', 'Unknown')}: {field.get('value')}\n"
+            
+            formatted_candidates_data += "\n"
+        
+        # Format job data if available
+        formatted_job_data = ""
+        if job_data:
+            job_details = job_data.get('data', job_data)
+            formatted_job_data = f"Job Title: {job_details.get('job_name', '')}\n"
+            formatted_job_data += f"Company: {job_details.get('company_name', '')}\n"
+            formatted_job_data += f"Location: {job_details.get('job_location', '')}\n"
+            formatted_job_data += f"Description: {job_details.get('job_description', '')}\n"
+            
+            # Add custom fields
+            for field in job_details.get('custom_fields', []):
+                if isinstance(field, dict) and field.get('value'):
+                    formatted_job_data += f"{field.get('field_name', 'Unknown')}: {field.get('value')}\n"
+
+        # Build prompt using multiple-candidates-prompts
+        prompt_kwargs = {
+            'client_name': client_name,
+            'job_url': job_url,
+            'preferred_candidate': preferred_candidate,
+            'additional_context': additional_context,
+            'candidates_data': formatted_candidates_data,
+            'job_data': formatted_job_data
+        }
+        
+        full_prompt = build_full_prompt(prompt_type, "multiple", **prompt_kwargs)
+        
+        # Generate content with AI
+        app.logger.info("Generating AI content for multiple candidates...")
+        ai_response = generate_ai_response(full_prompt)
+        
+        if not ai_response:
+            return jsonify({'error': 'Failed to generate AI content'}), 500
+        
+        # Replace placeholder links if job_url provided
+        final_content = ai_response
+        if job_url:
+            final_content = ai_response.replace('[HERE_LINK]', f'<a href="{job_url}">here</a>')
+        
+        app.logger.info("Multiple candidates content generated successfully")
+        
+        response = {
+            'success': True,
+            'generated_content': final_content,
+            'candidates_processed': len(candidates_data),
+            'candidates_failed': len(failed_candidates),
+            'failed_urls': failed_candidates
+        }
+        
+        return jsonify(response), 200
+        
+    except Exception as e:
+        app.logger.error(f"!!! EXCEPTION in generate_multiple_candidates: {e}")
+        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 @app.route('/api/log-feedback', methods=['POST'])
 def log_feedback():

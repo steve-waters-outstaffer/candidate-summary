@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { logoutUser } from '../services/AuthService.js';
 import CandidateSummaryGenerator from './CandidateSummaryGenerator';
+import MainGenerator from './MainGenerator';
 import { CustomColors } from '../theme';
 
 const Dashboard = () => {
@@ -49,7 +50,7 @@ const Dashboard = () => {
             </AppBar>
 
             <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-                <CandidateSummaryGenerator />
+                <MainGenerator />
             </Container>
         </Box>
     );
