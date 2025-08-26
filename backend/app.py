@@ -1,18 +1,30 @@
 import os
-import re
-import requests
 import logging
 import datetime
-import io
-import mimetypes  # <-- New import
-from file_converter import convert_to_supported_format, UnsupportedFileTypeError
+import mimetypes
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+# Load environment variables from a .env file
+load_dotenv()
 import google.generativeai as genai
 from google.cloud import firestore
 from config.prompts import build_full_prompt, get_available_prompts
-from urllib.parse import urlparse
+
+# Import all helper functions
+from helpers import (
+    fetch_recruitcrm_candidate,
+    fetch_recruitcrm_job,
+    fetch_alpharun_interview,
+    extract_fireflies_transcript_id,
+    fetch_fireflies_transcript,
+    normalise_fireflies_transcript,
+    upload_resume_to_gemini,
+    generate_html_summary,
+    generate_ai_response,
+    get_recruitcrm_headers
+)
 
 # ==============================================================================
 # 1. INITIALIZATION & CONFIGURATION
@@ -24,7 +36,7 @@ load_dotenv()
 # Initialize the Flask application
 app = Flask(__name__)
 
-# --- MODIFIED: More explicit CORS configuration to handle preflight requests ---
+# --- CORS configuration ---
 CORS(app,
      origins=[
          "https://candidate-summary-ai.web.app",  # Deployed frontend
@@ -32,25 +44,18 @@ CORS(app,
          "http://localhost:3000"                  # Local development (Create React App)
      ],
      methods=["GET", "POST", "OPTIONS"],
-     headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Authorization"],
      supports_credentials=True
      )
 
-
 # --- Configure Logging ---
 logging.basicConfig(level=logging.INFO)
-
-# --- API Configuration ---
-RECRUITCRM_BASE_URL = "https://api.recruitcrm.io/v1"
-ALPHARUN_BASE_URL = "https://api.alpharun.com/api/v1"
-FIREFLIES_GRAPHQL_URL = "https://api.fireflies.ai/graphql"
 
 # --- Environment Variable Checks ---
 RECRUITCRM_API_KEY = os.getenv('RECRUITCRM_API_KEY')
 ALPHARUN_API_KEY = os.getenv('ALPHARUN_API_KEY')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-FIREFLIES_API_KEY = os.getenv('FIREFLIES_API_KEY') # Now read from server environment
-
+FIREFLIES_API_KEY = os.getenv('FIREFLIES_API_KEY')
 
 if not RECRUITCRM_API_KEY:
     app.logger.error("!!! FATAL ERROR: RECRUITCRM_API_KEY environment variable is not set.")
@@ -60,7 +65,6 @@ if not GOOGLE_API_KEY:
     app.logger.error("!!! FATAL ERROR: GOOGLE_API_KEY environment variable is not set.")
 if not FIREFLIES_API_KEY:
     app.logger.error("!!! FATAL ERROR: FIREFLIES_API_KEY environment variable is not set.")
-
 
 # Configure Google Gemini
 try:
@@ -80,235 +84,7 @@ except Exception as e:
     db = None
 
 # ==============================================================================
-# 2. EXTERNAL API HELPER FUNCTIONS
-# ==============================================================================
-
-def get_recruitcrm_headers():
-    """Returns the authorization headers for RecruitCRM."""
-    return {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {RECRUITCRM_API_KEY}"
-    }
-
-def get_alpharun_headers():
-    """Returns the authorization headers for AlphaRun."""
-    return {
-        "Authorization": f"Bearer {ALPHARUN_API_KEY}"
-    }
-
-def fetch_recruitcrm_candidate(slug):
-    """Fetches a single candidate record from RecruitCRM."""
-    url = f"{RECRUITCRM_BASE_URL}/candidates/{slug}"
-    app.logger.info(f"LOG: Fetching candidate from {url}")
-    try:
-        response = requests.get(url, headers=get_recruitcrm_headers())
-        app.logger.info(f"LOG: RecruitCRM candidate API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            app.logger.error(f"!!! ERROR: RecruitCRM candidate API failed. Body: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during candidate fetch: {e}")
-        return None
-
-def fetch_recruitcrm_job(slug):
-    """Fetches a single job record from RecruitCRM."""
-    url = f"{RECRUITCRM_BASE_URL}/jobs/{slug}"
-    app.logger.info(f"LOG: Fetching job from {url}")
-    try:
-        response = requests.get(url, headers=get_recruitcrm_headers())
-        app.logger.info(f"LOG: RecruitCRM job API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            app.logger.error(f"!!! ERROR: RecruitCRM job API failed. Body: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during job fetch: {e}")
-        return None
-
-def fetch_alpharun_interview(job_opening_id, interview_id):
-    """Fetches interview data from AlphaRun using the job opening ID."""
-    url = f"{ALPHARUN_BASE_URL}/job-openings/{job_opening_id}/interviews/{interview_id}"
-    app.logger.info(f"LOG: Fetching interview from {url}")
-    try:
-        response = requests.get(url, headers=get_alpharun_headers())
-        app.logger.info(f"LOG: AlphaRun interview API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            app.logger.error(f"!!! ERROR: AlphaRun interview API failed. Body: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during interview fetch: {e}")
-        return None
-
-# --- Fireflies.ai Helper Functions ---
-
-ULID_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
-
-def extract_fireflies_transcript_id(s: str) -> str | None:
-    """Parses a string to find a Fireflies transcript ID."""
-    s = s.strip()
-    if s.startswith("http://") or s.startswith("https://"):
-        try:
-            path_segment = urlparse(s).path.rsplit("/", 1)[-1]
-            parts = path_segment.split("::")
-            if len(parts) == 2 and ULID_PATTERN.fullmatch(parts[1]):
-                return parts[1]
-        except (IndexError, ValueError):
-            return None
-    if ULID_PATTERN.fullmatch(s):
-        return s
-    return None
-
-def fetch_fireflies_transcript(transcript_id: str) -> dict:
-    """Fetches a transcript from the Fireflies GraphQL API using the server's API key."""
-    headers = {
-        "Authorization": f"Bearer {FIREFLIES_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    query = """
-    query Transcript($id: String!) {
-      transcript(id: $id) {
-        id title date duration transcript_url
-        speakers { id name }
-        sentences { index speaker_name start_time end_time text }
-      }
-    }
-    """
-    variables = {"id": transcript_id}
-    app.logger.info(f"LOG: Fetching Fireflies transcript ID: {transcript_id}")
-    try:
-        resp = requests.post(
-            FIREFLIES_GRAPHQL_URL,
-            json={"query": query, "variables": variables},
-            headers=headers,
-            timeout=30
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-        if "errors" in payload:
-            app.logger.error(f"!!! ERROR: Fireflies GraphQL error: {payload['errors']}")
-            return None
-        return payload.get("data", {}).get("transcript")
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during Fireflies fetch: {e}")
-        return None
-
-def normalise_fireflies_transcript(tr: dict) -> dict:
-    """Produces a compact, LLM-ready JSON from the raw transcript data."""
-    app.logger.info("LOG: Normalising Fireflies transcript for LLM.")
-    speakers = [s.get("name") for s in (tr.get("speakers") or []) if s and s.get("name")]
-    lines = []
-    for s in (tr.get("sentences") or []):
-        speaker = s.get("speaker_name") or "Unknown"
-        text = s.get("text") or ""
-        lines.append(f"{speaker}: {text}".strip())
-
-    return {
-        "metadata": {
-            "title": tr.get("title"),
-            "url": tr.get("transcript_url"),
-            "speakers": speakers,
-        },
-        "content": "\n".join(lines),
-    }
-
-# --- END: Fireflies.ai Helper Functions ---
-
-
-# --- CORRECTED HELPER FUNCTION FOR RESUME HANDLING ---
-# --- UPDATED HELPER FUNCTION FOR RESUME HANDLING ---
-def upload_resume_to_gemini(resume_data: dict) -> dict | None:
-    """
-    Downloads a resume, converts it to a supported format if necessary,
-    and uploads it to the Gemini File API.
-    Returns the file object from the Gemini API if successful.
-    """
-    if not resume_data or 'file_link' not in resume_data or 'filename' not in resume_data:
-        app.logger.info("LOG: No valid resume data provided.")
-        return None
-
-    file_link = resume_data['file_link']
-    filename = resume_data['filename']
-    app.logger.info(f"LOG: Attempting to process resume: {filename}")
-
-    try:
-        # 1. Download the resume file from RecruitCRM
-        response = requests.get(file_link, timeout=30)
-        response.raise_for_status()
-        resume_bytes = response.content
-        app.logger.info(f"LOG: Successfully downloaded {filename} from RecruitCRM.")
-
-        # 2. Convert the file to a supported format (e.g., text/plain) if needed
-        try:
-            converted_bytes, supported_mime_type = convert_to_supported_format(
-                file_bytes=resume_bytes,
-                original_filename=filename
-            )
-            app.logger.info(f"LOG: File '{filename}' processed for upload with MIME type '{supported_mime_type}'.")
-        except UnsupportedFileTypeError as e:
-            # Log a warning but don't crash the whole process.
-            # The summary generation will proceed without the resume.
-            app.logger.warning(f"!!! WARNING: Could not process resume. {e}")
-            return None
-
-        # 3. Upload the processed file content to the Gemini File API
-        gemini_file = genai.upload_file(
-            path=io.BytesIO(converted_bytes),
-            display_name=filename,
-            mime_type=supported_mime_type # <-- Use the new supported mime type
-        )
-        app.logger.info(f"LOG: Successfully uploaded resume to Gemini. URI: {gemini_file.uri}")
-
-        return gemini_file
-
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during resume download: {e}")
-        return None
-    except Exception as e:
-        # This will catch errors from the Gemini API upload itself
-        app.logger.error(f"!!! EXCEPTION during resume upload to Gemini: {e}")
-        return None
-
-
-def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data=None, gemini_resume_file=None):
-    """Generate HTML summary using Google Gemini and clean the response."""
-    app.logger.info(f"LOG: Generating HTML summary with Gemini using prompt type: {prompt_type}")
-
-    prompt_text = build_full_prompt(
-        prompt_type=prompt_type,
-        candidate_data=candidate_data,
-        job_data=job_data,
-        interview_data=interview_data,
-        additional_context=additional_context,
-        fireflies_data=fireflies_data
-    )
-
-    prompt_contents = [prompt_text]
-
-    if gemini_resume_file:
-        prompt_contents.append(gemini_resume_file)
-        app.logger.info("LOG: Appending resume file to Gemini prompt.")
-
-    try:
-        response = model.generate_content(prompt_contents)
-        raw_html = response.text
-        app.logger.info("LOG: Cleaning Gemini response.")
-        cleaned_html = raw_html.strip()
-        if cleaned_html.startswith("```html"):
-            cleaned_html = cleaned_html[7:]
-        if cleaned_html.endswith("```"):
-            cleaned_html = cleaned_html[:-3]
-        return cleaned_html.strip()
-    except Exception as e:
-        app.logger.error(f"!!! EXCEPTION during Gemini summary generation: {e}")
-        return None
-
-# ==============================================================================
-# 3. FLASK API ROUTES
+# 2. FLASK API ROUTES
 # ==============================================================================
 
 @app.route('/health', methods=['GET'])
@@ -332,11 +108,17 @@ def list_prompts():
 @app.route('/api/test-candidate', methods=['POST'])
 def test_candidate():
     """Tests the connection to the RecruitCRM candidate API."""
+    print("DEBUG: test_candidate route hit")  # Add this line
     app.logger.info("\n--- Endpoint Hit: /api/test-candidate ---")
     data = request.get_json()
+    print(f"DEBUG: Request data: {data}")  # Add this line
     slug = data.get('candidate_slug')
     if not slug:
         return jsonify({'error': 'Missing candidate_slug'}), 400
+
+    print(f"DEBUG: About to call fetch_recruitcrm_candidate with slug: {slug}")  # Add this line
+    response_data = fetch_recruitcrm_candidate(slug)
+    print(f"DEBUG: fetch_recruitcrm_candidate returned: {type(response_data)}")  # Add this line
 
     response_data = fetch_recruitcrm_candidate(slug)
     if response_data:
@@ -403,7 +185,6 @@ def test_interview():
         })
     return jsonify({'error': 'Failed to fetch interview data'}), 404
 
-# --- NEW: Fireflies.ai Test Endpoint ---
 @app.route('/api/test-fireflies', methods=['POST'])
 def test_fireflies():
     """Tests the connection to the Fireflies API and returns the meeting title."""
@@ -426,8 +207,6 @@ def test_fireflies():
         })
     return jsonify({'error': 'Failed to fetch transcript data from Fireflies.ai'}), 404
 
-# In backend/app.py
-
 @app.route('/api/test-resume', methods=['POST'])
 def test_resume():
     """Checks for the presence of a resume in the candidate data."""
@@ -438,7 +217,6 @@ def test_resume():
     if not candidate_slug:
         return jsonify({'error': 'Missing candidate_slug'}), 400
 
-    # We fetch the full candidate record just like the main function does
     candidate_data = fetch_recruitcrm_candidate(candidate_slug)
 
     if candidate_data:
@@ -452,14 +230,12 @@ def test_resume():
                 'resume_name': resume_info.get('filename')
             })
         else:
-            # It's not an error if there's no resume, just a different status
             return jsonify({
-                'success': False, # Use success: false to indicate 'not found'
+                'success': False,
                 'message': 'No resume on file for this candidate.'
             })
 
     return jsonify({'error': 'Failed to fetch candidate data to check for resume'}), 404
-
 
 @app.route('/api/generate-summary', methods=['POST'])
 def generate_summary():
@@ -494,14 +270,12 @@ def generate_summary():
         else:
             app.logger.info("LOG: No interview ID or AlphaRun job ID provided, proceeding without interview data.")
 
-        # --- CORRECTED: Resume Handling Logic ---
+        # Resume handling
         gemini_resume_file = None
         if candidate_data:
-            # Safely access the nested 'data' object
             candidate_details = candidate_data.get('data', candidate_data)
             resume_info = candidate_details.get('resume')
             if resume_info:
-                # This function will handle download and upload, returning None on failure
                 gemini_resume_file = upload_resume_to_gemini(resume_info)
             else:
                 app.logger.info("LOG: No resume object found in candidate data.")
@@ -523,7 +297,7 @@ def generate_summary():
             missing = [name for name, d in [("candidate", candidate_data), ("job", job_data)] if not d]
             return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}'}), 500
 
-        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file)
+        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, model)
 
         if html_summary:
             return jsonify({'success': True, 'html_summary': html_summary, 'candidate_slug': candidate_slug})
@@ -533,7 +307,6 @@ def generate_summary():
     except Exception as e:
         app.logger.error(f"!!! TOP-LEVEL EXCEPTION in generate_summary: {e}")
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/api/push-to-recruitcrm', methods=['POST'])
 def push_to_recruitcrm():
@@ -547,7 +320,7 @@ def push_to_recruitcrm():
         if not candidate_slug or not html_summary:
             return jsonify({'error': 'Missing candidate slug or HTML summary'}), 400
 
-        url = f"{RECRUITCRM_BASE_URL}/candidates/{candidate_slug}"
+        url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
         files = {'candidate_summary': (None, html_summary)}
 
         response = requests.post(url, files=files, headers=get_recruitcrm_headers())
@@ -564,12 +337,12 @@ def push_to_recruitcrm():
 
 @app.route('/api/generate-multiple-candidates', methods=['POST'])
 def generate_multiple_candidates():
-    """Generates content for multiple candidates using multiple-candidates-prompts."""
+    """Generates content for multiple candidates using multiple-candidates-prompts with CV and interview data."""
     app.logger.info("\n--- Endpoint Hit: /api/generate-multiple-candidates ---")
-    
+
     try:
         data = request.get_json()
-        
+
         # Extract request data
         candidate_urls = data.get('candidate_urls', [])
         prompt_type = data.get('prompt_type', 'candidate-submission')
@@ -577,18 +350,19 @@ def generate_multiple_candidates():
         job_url = data.get('job_url', '')
         preferred_candidate = data.get('preferred_candidate', '')
         additional_context = data.get('additional_context', '')
-        
+
         # Validate input
         if not candidate_urls or len(candidate_urls) == 0:
             return jsonify({'error': 'At least one candidate URL is required'}), 400
-        
+
         if len(candidate_urls) > 10:  # Safety limit
             return jsonify({'error': 'Maximum 10 candidates allowed'}), 400
-        
+
         app.logger.info(f"Processing {len(candidate_urls)} candidates with prompt type: {prompt_type}")
-        
+
         # Fetch job description if job_url provided
         job_data = None
+        alpharun_job_id = None
         if job_url:
             try:
                 app.logger.info(f"Fetching job description from: {job_url}")
@@ -596,55 +370,119 @@ def generate_multiple_candidates():
                 job_response = fetch_recruitcrm_job(job_slug)
                 if job_response:
                     job_data = job_response
+                    # Extract AlphaRun job ID for interview fetching
+                    job_details = job_data.get('data', job_data)
+                    for field in job_details.get('custom_fields', []):
+                        if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
+                            alpharun_job_id = field.get('value')
+                            break
                     app.logger.info("Successfully fetched job description")
                 else:
                     app.logger.warning("Failed to fetch job description")
             except Exception as e:
                 app.logger.error(f"Error fetching job description: {e}")
-        
-        # Process each candidate sequentially
+
+        # Process each candidate with enhanced data collection
         candidates_data = []
         failed_candidates = []
-        
+        resume_files = []
+
         for i, url in enumerate(candidate_urls):
             try:
-                app.logger.info(f"Fetching candidate {i+1}/{len(candidate_urls)}: {url}")
-                
-                # Extract slug from URL (reuse existing logic)
+                app.logger.info(f"Processing candidate {i+1}/{len(candidate_urls)}: {url}")
+
+                # Extract slug from URL
                 slug = url.split('/')[-1] if '/' in url else url
-                
-                # Fetch candidate data
+
+                # Fetch basic candidate data
                 candidate_data = fetch_recruitcrm_candidate(slug)
-                if candidate_data:
-                    candidates_data.append(candidate_data)
-                    app.logger.info(f"Successfully fetched candidate {i+1}")
-                else:
+                if not candidate_data:
                     failed_candidates.append(url)
                     app.logger.warning(f"Failed to fetch candidate {i+1}: {url}")
-                    
+                    continue
+
+                candidate_details = candidate_data.get('data', candidate_data)
+
+                # Process resume
+                gemini_resume_file = None
+                resume_info = candidate_details.get('resume')
+                if resume_info:
+                    app.logger.info(f"Processing resume for candidate {i+1}")
+                    gemini_resume_file = upload_resume_to_gemini(resume_info)
+                    if gemini_resume_file:
+                        resume_files.append(gemini_resume_file)
+                        app.logger.info(f"Successfully uploaded resume for candidate {i+1}")
+                    else:
+                        app.logger.warning(f"Failed to upload resume for candidate {i+1}")
+                else:
+                    app.logger.info(f"No resume found for candidate {i+1}")
+
+                # Fetch interview data
+                interview_data = None
+                if alpharun_job_id:
+                    for field in candidate_details.get('custom_fields', []):
+                        if isinstance(field, dict) and field.get('field_name') == 'AI Interview ID':
+                            raw_interview_id = field.get('value')
+                            if raw_interview_id:
+                                interview_id = raw_interview_id.split('?')[0]
+                                app.logger.info(f"Fetching interview data for candidate {i+1}")
+                                interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+                                if interview_data:
+                                    app.logger.info(f"Successfully fetched interview for candidate {i+1}")
+                                else:
+                                    app.logger.warning(f"Failed to fetch interview for candidate {i+1}")
+                            break
+                else:
+                    app.logger.info("No AlphaRun job ID available for interview fetching")
+
+                # Store enriched candidate data
+                candidates_data.append({
+                    'basic_data': candidate_data,
+                    'resume_file': gemini_resume_file,
+                    'interview_data': interview_data,
+                    'candidate_number': i + 1
+                })
+
+                app.logger.info(f"Successfully processed candidate {i+1}")
+
             except Exception as e:
                 app.logger.error(f"Error processing candidate {i+1}: {e}")
                 failed_candidates.append(url)
-        
+
         if not candidates_data:
             return jsonify({'error': 'No valid candidate data could be retrieved'}), 400
-        
-        # Prepare data for prompt generation
+
+        # Prepare enhanced data for prompt generation
         formatted_candidates_data = ""
-        for i, candidate in enumerate(candidates_data):
+        for candidate_info in candidates_data:
+            candidate = candidate_info['basic_data']
             candidate_details = candidate.get('data', candidate)
-            formatted_candidates_data += f"\n**CANDIDATE {i+1}:**\n"
+            candidate_num = candidate_info['candidate_number']
+
+            formatted_candidates_data += f"\n**CANDIDATE {candidate_num}:**\n"
             formatted_candidates_data += f"Name: {candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}\n"
             formatted_candidates_data += f"Email: {candidate_details.get('email', '')}\n"
             formatted_candidates_data += f"Phone: {candidate_details.get('mobile_phone', '')}\n"
-            
+
             # Add custom fields
             for field in candidate_details.get('custom_fields', []):
                 if isinstance(field, dict) and field.get('value'):
                     formatted_candidates_data += f"{field.get('field_name', 'Unknown')}: {field.get('value')}\n"
-            
+
+            # Add interview insights if available
+            if candidate_info['interview_data']:
+                interview = candidate_info['interview_data'].get('data', {}).get('interview', {})
+                formatted_candidates_data += f"Interview Status: Completed\n"
+                # Add any other relevant interview fields you want to include
+
+            # Note about resume availability
+            if candidate_info['resume_file']:
+                formatted_candidates_data += f"Resume: Available for AI analysis\n"
+            else:
+                formatted_candidates_data += f"Resume: Not available\n"
+
             formatted_candidates_data += "\n"
-        
+
         # Format job data if available
         formatted_job_data = ""
         if job_data:
@@ -653,7 +491,7 @@ def generate_multiple_candidates():
             formatted_job_data += f"Company: {job_details.get('company_name', '')}\n"
             formatted_job_data += f"Location: {job_details.get('job_location', '')}\n"
             formatted_job_data += f"Description: {job_details.get('job_description', '')}\n"
-            
+
             # Add custom fields
             for field in job_details.get('custom_fields', []):
                 if isinstance(field, dict) and field.get('value'):
@@ -668,33 +506,47 @@ def generate_multiple_candidates():
             'candidates_data': formatted_candidates_data,
             'job_data': formatted_job_data
         }
-        
+
         full_prompt = build_full_prompt(prompt_type, "multiple", **prompt_kwargs)
-        
-        # Generate content with AI
-        app.logger.info("Generating AI content for multiple candidates...")
-        ai_response = generate_ai_response(full_prompt)
-        
+
+        # Generate content with AI including resumes
+        app.logger.info("Generating AI content for multiple candidates with enhanced data...")
+
+        # Prepare content for Gemini (text + resume files)
+        prompt_contents = [full_prompt]
+        if resume_files:
+            prompt_contents.extend(resume_files)
+            app.logger.info(f"Including {len(resume_files)} resume files in AI generation")
+
+        try:
+            response = model.generate_content(prompt_contents)
+            ai_response = response.text
+        except Exception as e:
+            app.logger.error(f"Error generating AI content: {e}")
+            return jsonify({'error': 'Failed to generate AI content'}), 500
+
         if not ai_response:
             return jsonify({'error': 'Failed to generate AI content'}), 500
-        
+
         # Replace placeholder links if job_url provided
         final_content = ai_response
         if job_url:
             final_content = ai_response.replace('[HERE_LINK]', f'<a href="{job_url}">here</a>')
-        
+
         app.logger.info("Multiple candidates content generated successfully")
-        
+
         response = {
             'success': True,
             'generated_content': final_content,
             'candidates_processed': len(candidates_data),
             'candidates_failed': len(failed_candidates),
-            'failed_urls': failed_candidates
+            'failed_urls': failed_candidates,
+            'resumes_processed': len(resume_files),
+            'interviews_processed': sum(1 for c in candidates_data if c['interview_data'])
         }
-        
+
         return jsonify(response), 200
-        
+
     except Exception as e:
         app.logger.error(f"!!! EXCEPTION in generate_multiple_candidates: {e}")
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
@@ -726,7 +578,7 @@ def log_feedback():
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 # ==============================================================================
-# 4. MAIN EXECUTION BLOCK
+# 3. MAIN EXECUTION BLOCK
 # ==============================================================================
 
 if __name__ == '__main__':

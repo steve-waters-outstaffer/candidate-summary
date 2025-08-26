@@ -16,14 +16,8 @@ import {
     MenuItem,
     Tabs,
     Tab,
-    Chip
+    Divider
 } from '@mui/material';
-import {
-    CheckCircle,
-    Cancel,
-    Delete,
-    Add
-} from '@mui/icons-material';
 
 const CustomColors = {
     SecretGarden: '#5a9a5a',
@@ -32,21 +26,23 @@ const CustomColors = {
     UIGrey500: '#9e9e9e',
     UIGrey300: '#e0e0e0',
     UIGrey100: '#f5f5f5',
-    MidnightBlue: '#191970',
 };
+const FontWeight = { Medium: 500 };
 const Spacing = { Large: 3, Medium: 2, Small: 1 };
 
 const MultipleCandidatesGenerator = () => {
+    const [candidateUrls, setCandidateUrls] = useState(['', '', '', '', '']);
     const [formData, setFormData] = useState({
-        candidate_urls: ['', '', '', '', ''],
         client_name: '',
-        job_url: '',
+        outstaffer_platform_url: '',
         preferred_candidate: '',
         additional_context: '',
         prompt_type: ''
     });
-    
-    const [candidateValidation, setCandidateValidation] = useState({});
+
+    // Status tracking
+    const [candidateStatuses, setCandidateStatuses] = useState({});
+    const [jobStatus, setJobStatus] = useState({ status: 'pending', message: '', data: null });
     const [availablePrompts, setAvailablePrompts] = useState([]);
     const [generatedContent, setGeneratedContent] = useState('');
     const [loading, setLoading] = useState(false);
@@ -56,7 +52,6 @@ const MultipleCandidatesGenerator = () => {
     // API Base URL from environment
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-    // Load available prompts on component mount
     useEffect(() => {
         fetchAvailablePrompts();
     }, []);
@@ -68,6 +63,9 @@ const MultipleCandidatesGenerator = () => {
             if (response.ok) {
                 const prompts = await response.json();
                 setAvailablePrompts(prompts);
+                if (prompts.length > 0) {
+                    setFormData(prev => ({ ...prev, prompt_type: prompts[0].id }));
+                }
             }
         } catch (error) {
             console.error('Error fetching prompts:', error);
@@ -75,36 +73,106 @@ const MultipleCandidatesGenerator = () => {
     };
 
     const handleInputChange = (field, value) => {
-        setFormData(prev => ({
-            ...prev,
-            [field]: value
-        }));
+        setFormData(prev => ({ ...prev, [field]: value }));
     };
 
     const handleCandidateUrlChange = (index, value) => {
-        const newUrls = [...formData.candidate_urls];
+        const newUrls = [...candidateUrls];
         newUrls[index] = value;
-        setFormData(prev => ({
-            ...prev,
-            candidate_urls: newUrls
-        }));
-        
-        // Clear validation when URL changes
-        if (candidateValidation[index]) {
-            setCandidateValidation(prev => ({
+        setCandidateUrls(newUrls);
+
+        // Reset candidate status when URL changes
+        if (candidateStatuses[index]) {
+            setCandidateStatuses(prev => ({
                 ...prev,
-                [index]: undefined
+                [index]: {
+                    candidate: { status: 'pending', message: '', data: null },
+                    resume: { status: 'pending', message: '', data: null },
+                    interview: { status: 'pending', message: '', data: null }
+                }
             }));
+        }
+
+        // Extract and validate job from first candidate URL
+        if (index === 0 && value.trim()) {
+            extractAndValidateJobFromUrl(value);
         }
     };
 
-    const validateCandidateUrl = async (index) => {
-        const url = formData.candidate_urls[index];
+    const extractAndValidateJobFromUrl = (candidateUrl) => {
+        // Extract job slug from candidate URL pattern: /candidate-sequence/{job_slug}/assigned_candidates/{id}/{candidate_slug}
+        const regex = /candidate-sequence\/([^/]+)\/assigned_candidates\/\d+\/([^/]+)/;
+        const match = candidateUrl.match(regex);
+
+        if (match && match[1]) {
+            const jobSlug = match[1];
+            validateJob(jobSlug);
+        } else {
+            setJobStatus({
+                status: 'error',
+                message: 'Could not extract job from URL',
+                data: null
+            });
+        }
+    };
+
+    const validateJob = async (jobSlug) => {
+        setJobStatus({ status: 'loading', message: 'Confirming job...', data: null });
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/test-job`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_slug: jobSlug })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setJobStatus({
+                    status: 'success',
+                    message: data.job_name,
+                    data: data
+                });
+            } else {
+                const errorData = await response.json();
+                setJobStatus({
+                    status: 'error',
+                    message: errorData.error || 'Failed to validate job',
+                    data: null
+                });
+            }
+        } catch (error) {
+            setJobStatus({
+                status: 'error',
+                message: 'Network error validating job',
+                data: null
+            });
+        }
+    };
+
+    const validateCandidate = async (index) => {
+        const url = candidateUrls[index];
         if (!url.trim()) return;
 
-        setCandidateValidation(prev => ({
+        // Initialize candidate status if not exists
+        if (!candidateStatuses[index]) {
+            setCandidateStatuses(prev => ({
+                ...prev,
+                [index]: {
+                    candidate: { status: 'pending', message: '', data: null },
+                    resume: { status: 'pending', message: '', data: null },
+                    interview: { status: 'pending', message: '', data: null }
+                }
+            }));
+        }
+
+        // Update candidate status to loading
+        setCandidateStatuses(prev => ({
             ...prev,
-            [index]: { status: 'validating', name: '' }
+            [index]: {
+                ...prev[index],
+                candidate: { status: 'loading', message: 'Confirming candidate...', data: null }
+            }
         }));
 
         try {
@@ -117,30 +185,174 @@ const MultipleCandidatesGenerator = () => {
 
             if (response.ok) {
                 const data = await response.json();
-                setCandidateValidation(prev => ({
+                setCandidateStatuses(prev => ({
                     ...prev,
                     [index]: {
-                        status: 'valid',
-                        name: data.candidate_name
+                        ...prev[index],
+                        candidate: {
+                            status: 'success',
+                            message: data.candidate_name,
+                            data: data
+                        }
                     }
                 }));
+
+                // Auto-validate resume
+                validateResume(index, slug);
+
+                // Auto-validate interview if we have job data
+                if (data.interview_id && jobStatus.data?.alpharun_job_id) {
+                    validateInterview(index, data.interview_id, jobStatus.data.alpharun_job_id);
+                }
+
             } else {
-                setCandidateValidation(prev => ({
+                const errorData = await response.json();
+                setCandidateStatuses(prev => ({
                     ...prev,
-                    [index]: { status: 'invalid', name: '' }
+                    [index]: {
+                        ...prev[index],
+                        candidate: {
+                            status: 'error',
+                            message: errorData.error || 'Failed to confirm candidate',
+                            data: null
+                        }
+                    }
                 }));
             }
         } catch (error) {
-            setCandidateValidation(prev => ({
+            setCandidateStatuses(prev => ({
                 ...prev,
-                [index]: { status: 'invalid', name: '' }
+                [index]: {
+                    ...prev[index],
+                    candidate: {
+                        status: 'error',
+                        message: 'Network error',
+                        data: null
+                    }
+                }
+            }));
+        }
+    };
+
+    const validateResume = async (index, candidateSlug) => {
+        setCandidateStatuses(prev => ({
+            ...prev,
+            [index]: {
+                ...prev[index],
+                resume: { status: 'loading', message: 'Checking resume...', data: null }
+            }
+        }));
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/test-resume`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ candidate_slug: candidateSlug })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setCandidateStatuses(prev => ({
+                    ...prev,
+                    [index]: {
+                        ...prev[index],
+                        resume: {
+                            status: data.success ? 'success' : 'error',
+                            message: data.success ? data.resume_name : data.message,
+                            data: data
+                        }
+                    }
+                }));
+            } else {
+                setCandidateStatuses(prev => ({
+                    ...prev,
+                    [index]: {
+                        ...prev[index],
+                        resume: {
+                            status: 'error',
+                            message: 'No resume on file',
+                            data: null
+                        }
+                    }
+                }));
+            }
+        } catch (error) {
+            setCandidateStatuses(prev => ({
+                ...prev,
+                [index]: {
+                    ...prev[index],
+                    resume: {
+                        status: 'error',
+                        message: 'Network error',
+                        data: null
+                    }
+                }
+            }));
+        }
+    };
+
+    const validateInterview = async (index, interviewId, alpharunJobId) => {
+        setCandidateStatuses(prev => ({
+            ...prev,
+            [index]: {
+                ...prev[index],
+                interview: { status: 'loading', message: 'Checking interview...', data: null }
+            }
+        }));
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/test-interview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    interview_id: interviewId,
+                    alpharun_job_id: alpharunJobId
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setCandidateStatuses(prev => ({
+                    ...prev,
+                    [index]: {
+                        ...prev[index],
+                        interview: {
+                            status: 'success',
+                            message: `Confirmed: ${data.candidate_name}`,
+                            data: data
+                        }
+                    }
+                }));
+            } else {
+                setCandidateStatuses(prev => ({
+                    ...prev,
+                    [index]: {
+                        ...prev[index],
+                        interview: {
+                            status: 'error',
+                            message: 'No interview found',
+                            data: null
+                        }
+                    }
+                }));
+            }
+        } catch (error) {
+            setCandidateStatuses(prev => ({
+                ...prev,
+                [index]: {
+                    ...prev[index],
+                    interview: {
+                        status: 'error',
+                        message: 'Network error',
+                        data: null
+                    }
+                }
             }));
         }
     };
 
     const generateContent = async () => {
-        // Validate we have at least one candidate URL
-        const validUrls = formData.candidate_urls.filter(url => url.trim());
+        const validUrls = candidateUrls.filter(url => url.trim());
         if (validUrls.length === 0) {
             showAlert('error', 'Please provide at least one candidate URL');
             return;
@@ -154,16 +366,26 @@ const MultipleCandidatesGenerator = () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    ...formData,
-                    candidate_urls: validUrls
+                    candidate_urls: validUrls,
+                    client_name: formData.client_name,
+                    job_url: formData.outstaffer_platform_url,
+                    preferred_candidate: formData.preferred_candidate,
+                    additional_context: formData.additional_context,
+                    prompt_type: formData.prompt_type
                 })
             });
 
             if (response.ok) {
                 const data = await response.json();
                 setGeneratedContent(data.generated_content);
-                
+
                 let message = `Generated content for ${data.candidates_processed} candidates`;
+                if (data.resumes_processed) {
+                    message += ` (${data.resumes_processed} resumes processed)`;
+                }
+                if (data.interviews_processed) {
+                    message += ` (${data.interviews_processed} interviews included)`;
+                }
                 if (data.candidates_failed > 0) {
                     message += ` (${data.candidates_failed} failed)`;
                 }
@@ -182,100 +404,128 @@ const MultipleCandidatesGenerator = () => {
 
     const showAlert = (type, message) => {
         setAlert({ show: true, type, message });
+        setTimeout(() => setAlert({ show: false, type: 'info', message: '' }), 5000);
     };
 
     const handleViewChange = (event, newValue) => {
         setView(newValue);
     };
 
+    const getStatusColor = (status) => {
+        switch (status) {
+            case 'success': return CustomColors.SecretGarden;
+            case 'error': return CustomColors.DarkRed;
+            case 'loading': return CustomColors.DeepSkyBlue;
+            default: return CustomColors.UIGrey500;
+        }
+    };
+
     const getValidatedCandidateNames = () => {
-        return Object.entries(candidateValidation)
-            .filter(([_, validation]) => validation?.status === 'valid')
-            .map(([index, validation]) => ({
+        return Object.entries(candidateStatuses)
+            .filter(([_, status]) => status?.candidate?.status === 'success')
+            .map(([index, status]) => ({
                 index: parseInt(index),
-                name: validation.name
+                name: status.candidate.data.candidate_name
             }));
     };
 
-    const renderCandidateUrlField = (index) => {
-        const validation = candidateValidation[index];
-        const hasValue = formData.candidate_urls[index].trim();
-        
+    const renderCandidateStatus = (index) => {
+        const status = candidateStatuses[index];
+        const hasUrl = candidateUrls[index].trim();
+
+        if (!hasUrl) return null;
+
         return (
-            <Box key={index} sx={{ mb: 2 }}>
-                <Grid container spacing={2} alignItems="center">
-                    <Grid item xs={10}>
-                        <TextField
-                            label={`Candidate ${index + 1} URL`}
-                            value={formData.candidate_urls[index]}
-                            onChange={(e) => handleCandidateUrlChange(index, e.target.value)}
-                            onBlur={() => hasValue && validateCandidateUrl(index)}
-                            fullWidth
-                            variant="outlined"
-                            placeholder="https://outstaffer.recruitcrm.io/candidates/..."
-                            InputProps={{
-                                endAdornment: validation && (
-                                    <Box sx={{ ml: 1 }}>
-                                        {validation.status === 'validating' && <CircularProgress size={20} />}
-                                        {validation.status === 'valid' && <CheckCircle sx={{ color: CustomColors.SecretGarden }} />}
-                                        {validation.status === 'invalid' && <Cancel sx={{ color: CustomColors.DarkRed }} />}
-                                    </Box>
-                                )
-                            }}
-                        />
-                        {validation?.status === 'valid' && (
-                            <Typography variant="caption" sx={{ color: CustomColors.SecretGarden, mt: 1 }}>
-                                ✓ {validation.name}
-                            </Typography>
-                        )}
-                    </Grid>
-                    <Grid item xs={2}>
-                        <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => validateCandidateUrl(index)}
-                            disabled={!hasValue || validation?.status === 'validating'}
-                        >
-                            Validate
-                        </Button>
-                    </Grid>
-                </Grid>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Candidate Profile:</Typography>
+                    <Typography variant="body2" sx={{ color: getStatusColor(status?.candidate?.status || 'pending') }}>
+                        {status?.candidate?.message || 'Pending confirmation'}
+                    </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Resume:</Typography>
+                    <Typography variant="body2" sx={{ color: getStatusColor(status?.resume?.status || 'pending') }}>
+                        {status?.resume?.message || 'Pending candidate'}
+                    </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Anna AI Interview:</Typography>
+                    <Typography variant="body2" sx={{ color: getStatusColor(status?.interview?.status || 'pending') }}>
+                        {status?.interview?.message || 'Pending candidate'}
+                    </Typography>
+                </Box>
             </Box>
         );
     };
 
+    const renderCandidateUrlField = (index) => {
+        const hasValue = candidateUrls[index].trim();
+
+        return (
+            <Box key={index} sx={{ mb: 3 }}>
+                <TextField
+                    label={`Candidate ${index + 1} URL`}
+                    value={candidateUrls[index]}
+                    onChange={(e) => handleCandidateUrlChange(index, e.target.value)}
+                    fullWidth
+                    variant="outlined"
+                    placeholder="Paste URL from RecruitCRM here..."
+                    sx={{ mb: 1 }}
+                />
+                <Button
+                    variant="outlined"
+                    onClick={() => validateCandidate(index)}
+                    disabled={!hasValue || candidateStatuses[index]?.candidate?.status === 'loading'}
+                    size="small"
+                >
+                    {candidateStatuses[index]?.candidate?.status === 'loading' ? <CircularProgress size={16} /> : 'Confirm Details'}
+                </Button>
+                {renderCandidateStatus(index)}
+            </Box>
+        );
+    };
+
+    const getTotalCandidatesReady = () => {
+        return Object.values(candidateStatuses).filter(status =>
+            status?.candidate?.status === 'success'
+        ).length;
+    };
+
+    const isGenerateDisabled = loading ||
+        getTotalCandidatesReady() === 0 ||
+        !formData.prompt_type ||
+        jobStatus.status !== 'success';
+
     return (
-        <Card>
-            <CardContent>
-                <Typography variant="h5" gutterBottom>
-                    Multiple Candidates Generator
-                </Typography>
-                
-                {alert.show && (
-                    <Alert 
-                        severity={alert.type} 
-                        onClose={() => setAlert({ show: false })}
-                        sx={{ mb: 2 }}
-                    >
-                        {alert.message}
-                    </Alert>
-                )}
+        <Box>
+            {alert.show && <Alert severity={alert.type} sx={{ mb: Spacing.Medium }}>{alert.message}</Alert>}
 
-                <Grid container spacing={3}>
-                    {/* Left Column - Input Form */}
-                    <Grid item xs={12} md={6}>
-                        <Box sx={{ mb: 3 }}>
-                            <Typography variant="h6" gutterBottom>
-                                Candidate URLs
-                            </Typography>
-                            {formData.candidate_urls.map((_, index) => renderCandidateUrlField(index))}
-                        </Box>
+            <Grid container spacing={Spacing.Large}>
+                <Grid item xs={12} md={5}>
+                    <Card>
+                        <CardContent>
+                            <Typography variant="h4" sx={{ mb: Spacing.Medium }}>Input Data</Typography>
 
-                        <Box sx={{ mb: 3 }}>
-                            <Typography variant="h6" gutterBottom>
-                                Email Details
-                            </Typography>
-                            
+                            {/* Job Status Display */}
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: Spacing.Medium, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Job Description:</Typography>
+                                    <Typography variant="body2" sx={{ color: getStatusColor(jobStatus.status) }}>
+                                        {jobStatus.message || 'Pending first candidate URL'}
+                                    </Typography>
+                                </Box>
+                            </Box>
+
+                            {/* Candidate URLs */}
+                            <Typography variant="h6" sx={{ mb: 2 }}>Candidate URLs</Typography>
+                            {candidateUrls.map((_, index) => renderCandidateUrlField(index))}
+
+                            <Divider sx={{ my: Spacing.Medium }} />
+
+                            {/* Email Details */}
+                            <Typography variant="h6" sx={{ mb: 2 }}>Email Details</Typography>
+
                             <TextField
                                 label="Client Name"
                                 value={formData.client_name}
@@ -283,16 +533,7 @@ const MultipleCandidatesGenerator = () => {
                                 fullWidth
                                 sx={{ mb: 2 }}
                             />
-                            
-                            <TextField
-                                label="Job URL"
-                                value={formData.job_url}
-                                onChange={(e) => handleInputChange('job_url', e.target.value)}
-                                fullWidth
-                                sx={{ mb: 2 }}
-                                placeholder="https://outstaffer.recruitcrm.io/jobs/..."
-                            />
-                            
+
                             <FormControl fullWidth sx={{ mb: 2 }}>
                                 <InputLabel>Preferred Candidate</InputLabel>
                                 <Select
@@ -310,16 +551,15 @@ const MultipleCandidatesGenerator = () => {
                                     ))}
                                 </Select>
                             </FormControl>
-                            
+
                             <TextField
-                                label="Additional Context"
+                                label="Additional Context (Optional)"
                                 value={formData.additional_context}
                                 onChange={(e) => handleInputChange('additional_context', e.target.value)}
                                 fullWidth
                                 multiline
-                                rows={3}
+                                rows={4}
                                 sx={{ mb: 2 }}
-                                placeholder="Any additional context or instructions..."
                             />
 
                             <FormControl fullWidth sx={{ mb: 2 }}>
@@ -336,24 +576,40 @@ const MultipleCandidatesGenerator = () => {
                                     ))}
                                 </Select>
                             </FormControl>
-                        </Box>
 
-                        <Button
-                            variant="contained"
-                            color="primary"
-                            onClick={generateContent}
-                            disabled={loading}
-                            fullWidth
-                            sx={{ mb: 2 }}
-                        >
-                            {loading ? <CircularProgress size={24} /> : 'Generate Email'}
-                        </Button>
-                    </Grid>
+                            <TextField
+                                label="Outstaffer Platform URL (Optional)"
+                                value={formData.outstaffer_platform_url}
+                                onChange={(e) => handleInputChange('outstaffer_platform_url', e.target.value)}
+                                fullWidth
+                                sx={{ mb: 2 }}
+                                placeholder="Link to embed in email..."
+                            />
 
-                    {/* Right Column - Generated Content */}
-                    <Grid item xs={12} md={6}>
-                        {generatedContent && (
-                            <>
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                onClick={generateContent}
+                                disabled={isGenerateDisabled}
+                                fullWidth
+                                sx={{ mb: 1 }}
+                            >
+                                {loading ? <CircularProgress size={24} /> : 'Generate Email'}
+                            </Button>
+
+                            <Typography variant="body2" sx={{ color: CustomColors.UIGrey500, textAlign: 'center' }}>
+                                Ready: {getTotalCandidatesReady()} candidates confirmed
+                            </Typography>
+                        </CardContent>
+                    </Card>
+                </Grid>
+
+                <Grid item xs={12} md={7}>
+                    {generatedContent && (
+                        <Card>
+                            <CardContent>
+                                <Typography variant="h4" sx={{ mb: Spacing.Medium }}>Generated Email</Typography>
+
                                 <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
                                     <Tabs value={view} onChange={handleViewChange}>
                                         <Tab label="Preview" value="preview" />
@@ -362,11 +618,12 @@ const MultipleCandidatesGenerator = () => {
                                 </Box>
 
                                 {view === 'preview' && (
-                                    <Paper 
-                                        sx={{ 
-                                            p: 2, 
-                                            backgroundColor: CustomColors.UIGrey100, 
+                                    <Paper
+                                        sx={{
+                                            p: Spacing.Medium,
+                                            backgroundColor: CustomColors.UIGrey100,
                                             border: `1px solid ${CustomColors.UIGrey300}`,
+                                            borderRadius: 2,
                                             maxHeight: '600px',
                                             overflow: 'auto'
                                         }}
@@ -377,21 +634,24 @@ const MultipleCandidatesGenerator = () => {
 
                                 {view === 'html' && (
                                     <TextField
+                                        fullWidth
                                         multiline
                                         rows={20}
+                                        label="HTML Source (Copy to Email Client)"
                                         value={generatedContent}
-                                        fullWidth
-                                        variant="outlined"
-                                        InputProps={{ readOnly: true }}
-                                        sx={{ fontFamily: 'monospace' }}
+                                        InputProps={{
+                                            readOnly: true,
+                                            sx: { fontFamily: 'monospace', fontSize: '12px' }
+                                        }}
+                                        onClick={(e) => e.target.select()}
                                     />
                                 )}
-                            </>
-                        )}
-                    </Grid>
+                            </CardContent>
+                        </Card>
+                    )}
                 </Grid>
-            </CardContent>
-        </Card>
+            </Grid>
+        </Box>
     );
 };
 
