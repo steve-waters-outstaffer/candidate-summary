@@ -86,7 +86,6 @@ def fetch_recruitcrm_assigned_candidates(job_slug, status_id=None):
     try:
         response = requests.get(url, headers=get_recruitcrm_headers(), params=params)
         response.raise_for_status()
-        logging.info(f"Successfully fetched candidates for job {job_slug} with status {status_id}")
         return response.json().get('data', [])
     except requests.exceptions.RequestException as e:
         logging.error(f"Error fetching assigned candidates for job {job_slug}: {e}")
@@ -144,37 +143,45 @@ def normalise_fireflies_transcript(raw_transcript):
 
 def upload_resume_to_gemini(resume_info):
     """Downloads a resume, determines its MIME type, and uploads it to the Gemini API."""
-    if not resume_info or not resume_info.get('url'):
-        logging.warning("No resume URL provided in resume_info.")
+    if not resume_info:
+        logging.warning("No resume info object provided.")
         return None
+
+    resume_url = resume_info.get('file_link') or resume_info.get('url')
+
+    if not resume_url:
+        logging.warning(f"No 'file_link' or 'url' found in resume_info object: {resume_info}")
+        return None
+
     try:
-        resume_url = resume_info['url']
         file_response = requests.get(resume_url)
         file_response.raise_for_status()
 
         content_type = file_response.headers.get('Content-Type')
         filename = resume_info.get('filename', 'resume.bin')
 
-        # If Content-Type is not available, guess from filename
         if not content_type:
             content_type, _ = mimetypes.guess_type(filename)
             if not content_type:
-                content_type = 'application/octet-stream' # Default fallback
+                content_type = 'application/octet-stream'
                 logging.warning(f"Could not determine MIME type for {filename}, using {content_type}.")
 
         logging.info(f"Uploading '{filename}' with MIME type '{content_type}' to Gemini.")
 
-        # Using the Gemini File API
+        # --- THIS IS THE FIX ---
+        # Use the 'content' parameter for the file bytes, not 'path'
         gemini_file = genai.upload_file(
-            path=file_response.content,
+            content=file_response.content,
             display_name=filename,
             mime_type=content_type
         )
+        # --- END FIX ---
+
         logging.info(f"Completed uploading '{gemini_file.display_name}' to Gemini.")
         return gemini_file
 
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error downloading resume: {e}")
+        logging.error(f"Error downloading resume from {resume_url}: {e}")
         return None
     except Exception as e:
         logging.error(f"An unexpected error occurred during resume upload: {e}")
@@ -191,13 +198,10 @@ def generate_ai_response(model, prompt_parts):
 
 def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, model):
     """Builds the full prompt and generates an HTML summary using the AI model."""
-
-    # Prepare data for formatting
     candidate_details = candidate_data.get('data', candidate_data)
     job_details = job_data.get('data', job_data)
     interview_details = interview_data.get('data', interview_data) if interview_data else {}
 
-    # Build the prompt with all available data
     full_prompt = build_full_prompt(
         prompt_type,
         "single",
@@ -208,11 +212,9 @@ def generate_html_summary(candidate_data, job_data, interview_data, additional_c
         fireflies_data=fireflies_data
     )
 
-    # Construct the content parts for the AI model
     prompt_parts = [full_prompt]
     if gemini_resume_file:
         prompt_parts.append(gemini_resume_file)
         logging.info("Resume file included in the prompt for AI generation.")
 
-    # Generate the AI response
     return generate_ai_response(model, prompt_parts)
