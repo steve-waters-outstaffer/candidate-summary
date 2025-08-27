@@ -1,7 +1,6 @@
 import os
 import logging
-import datetime
-import mimetypes
+import re
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -11,6 +10,7 @@ load_dotenv()
 import google.generativeai as genai
 from google.cloud import firestore
 from config.prompts import build_full_prompt, get_available_prompts
+import datetime
 
 # Import all helper functions
 from helpers import (
@@ -363,6 +363,7 @@ def generate_multiple_candidates():
         # Fetch job description if job_url provided
         job_data = None
         alpharun_job_id = None
+        job_title = ''
         if job_url:
             try:
                 app.logger.info(f"Fetching job description from: {job_url}")
@@ -372,6 +373,7 @@ def generate_multiple_candidates():
                     job_data = job_response
                     # Extract AlphaRun job ID for interview fetching
                     job_details = job_data.get('data', job_data)
+                    job_title = job_details.get('name', '')
                     for field in job_details.get('custom_fields', []):
                         if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
                             alpharun_job_id = field.get('value')
@@ -487,7 +489,6 @@ def generate_multiple_candidates():
         formatted_job_data = ""
         if job_data:
             job_details = job_data.get('data', job_data)
-            formatted_job_data = f"Job Title: {job_details.get('job_name', '')}\n"
             formatted_job_data += f"Company: {job_details.get('company_name', '')}\n"
             formatted_job_data += f"Location: {job_details.get('job_location', '')}\n"
             formatted_job_data += f"Description: {job_details.get('job_description', '')}\n"
@@ -504,7 +505,8 @@ def generate_multiple_candidates():
             'preferred_candidate': preferred_candidate,
             'additional_context': additional_context,
             'candidates_data': formatted_candidates_data,
-            'job_data': formatted_job_data
+            'job_data': formatted_job_data,
+            'job_title': job_title,
         }
 
         full_prompt = build_full_prompt(prompt_type, "multiple", **prompt_kwargs)
@@ -521,17 +523,19 @@ def generate_multiple_candidates():
         try:
             response = model.generate_content(prompt_contents)
             ai_response = response.text
+            # Clean the response to remove markdown code block syntax
+            cleaned_content = re.sub(r'^```html\n|```$', '', ai_response, flags=re.MULTILINE)
         except Exception as e:
             app.logger.error(f"Error generating AI content: {e}")
             return jsonify({'error': 'Failed to generate AI content'}), 500
 
-        if not ai_response:
+        if not cleaned_content:
             return jsonify({'error': 'Failed to generate AI content'}), 500
 
         # Replace placeholder links if job_url provided
-        final_content = ai_response
+        final_content = cleaned_content
         if job_url:
-            final_content = ai_response.replace('[HERE_LINK]', f'<a href="{job_url}">here</a>')
+            final_content = cleaned_content.replace('[HERE_LINK]', f'<a href="{job_url}">here</a>')
 
         app.logger.info("Multiple candidates content generated successfully")
 

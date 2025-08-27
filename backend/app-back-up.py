@@ -1,13 +1,30 @@
 import os
-import requests
 import logging
 import datetime
+import mimetypes
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+# Load environment variables from a .env file
+load_dotenv()
 import google.generativeai as genai
 from google.cloud import firestore
-from config.prompts import build_full_prompt
+from config.prompts import build_full_prompt, get_available_prompts
+
+# Import all helper functions
+from helpers import (
+    fetch_recruitcrm_candidate,
+    fetch_recruitcrm_job,
+    fetch_alpharun_interview,
+    extract_fireflies_transcript_id,
+    fetch_fireflies_transcript,
+    normalise_fireflies_transcript,
+    upload_resume_to_gemini,
+    generate_html_summary,
+    generate_ai_response,
+    get_recruitcrm_headers
+)
 
 # ==============================================================================
 # 1. INITIALIZATION & CONFIGURATION
@@ -19,7 +36,7 @@ load_dotenv()
 # Initialize the Flask application
 app = Flask(__name__)
 
-# --- MODIFIED: More explicit CORS configuration to handle preflight requests ---
+# --- CORS configuration ---
 CORS(app,
      origins=[
          "https://candidate-summary-ai.web.app",  # Deployed frontend
@@ -27,22 +44,18 @@ CORS(app,
          "http://localhost:3000"                  # Local development (Create React App)
      ],
      methods=["GET", "POST", "OPTIONS"],
-     headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Authorization"],
      supports_credentials=True
      )
 
-
 # --- Configure Logging ---
 logging.basicConfig(level=logging.INFO)
-
-# --- API Configuration ---
-RECRUITCRM_BASE_URL = "https://api.recruitcrm.io/v1"
-ALPHARUN_BASE_URL = "https://api.alpharun.com/api/v1"
 
 # --- Environment Variable Checks ---
 RECRUITCRM_API_KEY = os.getenv('RECRUITCRM_API_KEY')
 ALPHARUN_API_KEY = os.getenv('ALPHARUN_API_KEY')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+FIREFLIES_API_KEY = os.getenv('FIREFLIES_API_KEY')
 
 if not RECRUITCRM_API_KEY:
     app.logger.error("!!! FATAL ERROR: RECRUITCRM_API_KEY environment variable is not set.")
@@ -50,6 +63,8 @@ if not ALPHARUN_API_KEY:
     app.logger.error("!!! FATAL ERROR: ALPHARUN_API_KEY environment variable is not set.")
 if not GOOGLE_API_KEY:
     app.logger.error("!!! FATAL ERROR: GOOGLE_API_KEY environment variable is not set.")
+if not FIREFLIES_API_KEY:
+    app.logger.error("!!! FATAL ERROR: FIREFLIES_API_KEY environment variable is not set.")
 
 # Configure Google Gemini
 try:
@@ -69,103 +84,7 @@ except Exception as e:
     db = None
 
 # ==============================================================================
-# 2. EXTERNAL API HELPER FUNCTIONS
-# ==============================================================================
-
-def get_recruitcrm_headers():
-    """Returns the authorization headers for RecruitCRM."""
-    return {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {RECRUITCRM_API_KEY}"
-    }
-
-def get_alpharun_headers():
-    """Returns the authorization headers for AlphaRun."""
-    return {
-        "Authorization": f"Bearer {ALPHARUN_API_KEY}"
-    }
-
-def fetch_recruitcrm_candidate(slug):
-    """Fetches a single candidate record from RecruitCRM."""
-    url = f"{RECRUITCRM_BASE_URL}/candidates/{slug}"
-    app.logger.info(f"LOG: Fetching candidate from {url}")
-    try:
-        response = requests.get(url, headers=get_recruitcrm_headers())
-        app.logger.info(f"LOG: RecruitCRM candidate API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            app.logger.error(f"!!! ERROR: RecruitCRM candidate API failed. Body: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during candidate fetch: {e}")
-        return None
-
-def fetch_recruitcrm_job(slug):
-    """Fetches a single job record from RecruitCRM."""
-    url = f"{RECRUITCRM_BASE_URL}/jobs/{slug}"
-    app.logger.info(f"LOG: Fetching job from {url}")
-    try:
-        response = requests.get(url, headers=get_recruitcrm_headers())
-        app.logger.info(f"LOG: RecruitCRM job API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            app.logger.error(f"!!! ERROR: RecruitCRM job API failed. Body: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during job fetch: {e}")
-        return None
-
-def fetch_alpharun_interview(job_opening_id, interview_id):
-    """Fetches interview data from AlphaRun using the job opening ID."""
-    url = f"{ALPHARUN_BASE_URL}/job-openings/{job_opening_id}/interviews/{interview_id}"
-    app.logger.info(f"LOG: Fetching interview from {url}")
-    try:
-        response = requests.get(url, headers=get_alpharun_headers())
-        app.logger.info(f"LOG: AlphaRun interview API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            app.logger.error(f"!!! ERROR: AlphaRun interview API failed. Body: {response.text}")
-            return None
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"!!! EXCEPTION during interview fetch: {e}")
-        return None
-
-def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type):
-    """Generate HTML summary using Google Gemini and clean the response."""
-    app.logger.info(f"LOG: Generating HTML summary with Gemini using prompt type: {prompt_type}")
-
-    # Build the full prompt using the function from prompts.py
-    prompt = build_full_prompt(
-        prompt_type=prompt_type,
-        candidate_data=candidate_data,
-        job_data=job_data,
-        interview_data=interview_data,
-        additional_context=additional_context
-    )
-
-    try:
-        response = model.generate_content(prompt)
-        raw_html = response.text
-
-        # Clean the response to remove markdown code fences
-        app.logger.info("LOG: Cleaning Gemini response.")
-        cleaned_html = raw_html.strip()
-        if cleaned_html.startswith("```html"):
-            cleaned_html = cleaned_html[7:]
-        if cleaned_html.endswith("```"):
-            cleaned_html = cleaned_html[:-3]
-
-        return cleaned_html.strip()
-
-    except Exception as e:
-        app.logger.error(f"!!! EXCEPTION during Gemini summary generation: {e}")
-        return None
-
-# ==============================================================================
-# 3. FLASK API ROUTES
+# 2. FLASK API ROUTES
 # ==============================================================================
 
 @app.route('/health', methods=['GET'])
@@ -174,80 +93,89 @@ def health_check():
     app.logger.info("LOG: Health check endpoint was hit.")
     return jsonify({'status': 'healthy'}), 200
 
+@app.route('/api/prompts', methods=['GET'])
+def list_prompts():
+    """Returns a list of available prompt configurations."""
+    app.logger.info("\n--- Endpoint Hit: /api/prompts ---")
+    try:
+        category = request.args.get('category', 'single')  # Default to single
+        prompts = get_available_prompts(category)
+        return jsonify(prompts), 200
+    except Exception as e:
+        app.logger.error(f"!!! EXCEPTION in list_prompts: {e}")
+        return jsonify({'error': 'Could not retrieve prompt list from server'}), 500
+
 @app.route('/api/test-candidate', methods=['POST'])
 def test_candidate():
-    """Tests the connection to the RecruitCRM candidate API and extracts the AI Interview ID."""
+    """Tests the connection to the RecruitCRM candidate API."""
+    print("DEBUG: test_candidate route hit")  # Add this line
     app.logger.info("\n--- Endpoint Hit: /api/test-candidate ---")
     data = request.get_json()
-    if not data or 'candidate_slug' not in data:
-        return jsonify({'error': 'Missing candidate_slug in request body'}), 400
-    slug = data['candidate_slug']
-    app.logger.info(f"LOG: Testing with candidate slug: {slug}")
+    print(f"DEBUG: Request data: {data}")  # Add this line
+    slug = data.get('candidate_slug')
+    if not slug:
+        return jsonify({'error': 'Missing candidate_slug'}), 400
+
+    print(f"DEBUG: About to call fetch_recruitcrm_candidate with slug: {slug}")  # Add this line
+    response_data = fetch_recruitcrm_candidate(slug)
+    print(f"DEBUG: fetch_recruitcrm_candidate returned: {type(response_data)}")  # Add this line
 
     response_data = fetch_recruitcrm_candidate(slug)
     if response_data:
         candidate_details = response_data.get('data', response_data)
         interview_id = None
-
-        custom_fields = candidate_details.get('custom_fields', [])
-        if isinstance(custom_fields, list):
-            for field in custom_fields:
-                if isinstance(field, dict) and field.get('field_name') == 'AI Interview ID':
-                    interview_id = field.get('value')
-                    app.logger.info(f"LOG: Found AI Interview ID: {interview_id}")
-                    break
-
+        for field in candidate_details.get('custom_fields', []):
+            if isinstance(field, dict) and field.get('field_name') == 'AI Interview ID':
+                raw_interview_id = field.get('value')
+                if raw_interview_id:
+                    interview_id = raw_interview_id.split('?')[0]
+                break
         return jsonify({
             'success': True,
             'message': 'Candidate confirmed',
             'candidate_name': f"{candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}".strip(),
             'interview_id': interview_id
         })
-    else:
-        return jsonify({'error': 'Failed to fetch candidate data'}), 404
+    return jsonify({'error': 'Failed to fetch candidate data'}), 404
 
 @app.route('/api/test-job', methods=['POST'])
 def test_job():
-    """Tests the connection to the RecruitCRM job API and extracts the AI Job ID."""
+    """Tests the connection to the RecruitCRM job API."""
     app.logger.info("\n--- Endpoint Hit: /api/test-job ---")
     data = request.get_json()
-    if not data or 'job_slug' not in data:
-        return jsonify({'error': 'Missing job_slug in request body'}), 400
-    slug = data['job_slug']
-    app.logger.info(f"LOG: Testing with job slug: {slug}")
+    slug = data.get('job_slug')
+    if not slug:
+        return jsonify({'error': 'Missing job_slug'}), 400
 
     response_data = fetch_recruitcrm_job(slug)
     if response_data:
         job_details = response_data.get('data', response_data)
         alpharun_job_id = None
-
-        custom_fields = job_details.get('custom_fields', [])
-        if isinstance(custom_fields, list):
-            for field in custom_fields:
-                if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
-                    alpharun_job_id = field.get('value')
-                    app.logger.info(f"LOG: Found AI Job ID: {alpharun_job_id}")
-                    break
-
+        for field in job_details.get('custom_fields', []):
+            if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
+                alpharun_job_id = field.get('value')
+                break
         return jsonify({
             'success': True,
             'message': 'Job confirmed',
             'job_name': job_details.get('name', 'Unknown Job'),
             'alpharun_job_id': alpharun_job_id
         })
-    else:
-        return jsonify({'error': 'Failed to fetch job data'}), 404
+    return jsonify({'error': 'Failed to fetch job data'}), 404
 
 @app.route('/api/test-interview', methods=['POST'])
 def test_interview():
     """Tests the connection to the AlphaRun interview API."""
     app.logger.info("\n--- Endpoint Hit: /api/test-interview ---")
     data = request.get_json()
-    if not data or 'interview_id' not in data or 'alpharun_job_id' not in data:
-        return jsonify({'error': 'Missing interview_id or alpharun_job_id in request body'}), 400
-    interview_id = data['interview_id']
-    job_opening_id = data['alpharun_job_id']
-    app.logger.info(f"LOG: Testing with AlphaRun Job ID: {job_opening_id} and Interview ID: {interview_id}")
+    raw_interview_id = data.get('interview_id')
+    job_opening_id = data.get('alpharun_job_id')
+    if not raw_interview_id or not job_opening_id:
+        return jsonify({'error': 'Missing interview_id or alpharun_job_id'}), 400
+
+    # Clean interview ID by removing URL parameters
+    interview_id = raw_interview_id.split('?')[0]
+
     interview_data = fetch_alpharun_interview(job_opening_id, interview_id)
     if interview_data:
         contact = interview_data.get('data', {}).get('interview', {}).get('contact', {})
@@ -255,38 +183,121 @@ def test_interview():
             'success': True, 'message': 'Interview confirmed',
             'candidate_name': f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
         })
-    else:
-        return jsonify({'error': 'Failed to fetch interview data'}), 404
+    return jsonify({'error': 'Failed to fetch interview data'}), 404
+
+@app.route('/api/test-fireflies', methods=['POST'])
+def test_fireflies():
+    """Tests the connection to the Fireflies API and returns the meeting title."""
+    app.logger.info("\n--- Endpoint Hit: /api/test-fireflies ---")
+    data = request.get_json()
+    transcript_url = data.get('transcript_url')
+    if not transcript_url:
+        return jsonify({'error': 'Missing transcript_url'}), 400
+
+    transcript_id = extract_fireflies_transcript_id(transcript_url)
+    if not transcript_id:
+        return jsonify({'error': 'Invalid Fireflies URL or Transcript ID'}), 400
+
+    transcript_data = fetch_fireflies_transcript(transcript_id)
+    if transcript_data:
+        return jsonify({
+            'success': True,
+            'message': 'Transcript confirmed',
+            'meeting_title': transcript_data.get('title', 'Unknown Title')
+        })
+    return jsonify({'error': 'Failed to fetch transcript data from Fireflies.ai'}), 404
+
+@app.route('/api/test-resume', methods=['POST'])
+def test_resume():
+    """Checks for the presence of a resume in the candidate data."""
+    app.logger.info("\n--- Endpoint Hit: /api/test-resume ---")
+    data = request.get_json()
+    candidate_slug = data.get('candidate_slug')
+
+    if not candidate_slug:
+        return jsonify({'error': 'Missing candidate_slug'}), 400
+
+    candidate_data = fetch_recruitcrm_candidate(candidate_slug)
+
+    if candidate_data:
+        candidate_details = candidate_data.get('data', candidate_data)
+        resume_info = candidate_details.get('resume')
+
+        if resume_info and resume_info.get('filename'):
+            return jsonify({
+                'success': True,
+                'message': 'Resume Found',
+                'resume_name': resume_info.get('filename')
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No resume on file for this candidate.'
+            })
+
+    return jsonify({'error': 'Failed to fetch candidate data to check for resume'}), 404
 
 @app.route('/api/generate-summary', methods=['POST'])
 def generate_summary():
-    """Generate candidate summary from provided slugs and interview ID"""
+    """Generate candidate summary, optionally including Fireflies and interview data."""
     app.logger.info("\n--- Endpoint Hit: /api/generate-summary ---")
     try:
         data = request.get_json()
         candidate_slug = data.get('candidate_slug')
         job_slug = data.get('job_slug')
         alpharun_job_id = data.get('alpharun_job_id')
-        interview_id = data.get('interview_id')
+        raw_interview_id = data.get('interview_id')
+        fireflies_url = data.get('fireflies_url')  # Optional
         additional_context = data.get('additional_context', '')
-        # Get the prompt_type from the request, default if not provided
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
 
-        if not all([candidate_slug, job_slug, interview_id, alpharun_job_id]):
-            return jsonify({'error': 'Missing required fields'}), 400
+        # Clean interview ID by removing URL parameters
+        interview_id = None
+        if raw_interview_id:
+            interview_id = raw_interview_id.split('?')[0]
 
-        # Fetch data from APIs
+        if not all([candidate_slug, job_slug]):
+            return jsonify({'error': 'Missing required RecruitCRM fields'}), 400
+
         candidate_data = fetch_recruitcrm_candidate(candidate_slug)
         job_data = fetch_recruitcrm_job(job_slug)
-        interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
 
-        if not all([candidate_data, job_data, interview_data]):
-            missing = [name for name, data in [("candidate", candidate_data), ("job", job_data), ("interview", interview_data)] if not data]
-            app.logger.error(f"!!! ERROR: Missing data for: {', '.join(missing)}")
-            return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}', 'missing_apis': missing}), 500
+        interview_data = None
+        if alpharun_job_id and interview_id:
+            interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+            if not interview_data:
+                app.logger.warning("!!! WARNING: Failed to fetch interview data, proceeding without it.")
+        else:
+            app.logger.info("LOG: No interview ID or AlphaRun job ID provided, proceeding without interview data.")
 
-        # Generate HTML summary using Gemini, passing the prompt_type
-        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type)
+        # Resume handling
+        gemini_resume_file = None
+        if candidate_data:
+            candidate_details = candidate_data.get('data', candidate_data)
+            resume_info = candidate_details.get('resume')
+            if resume_info:
+                gemini_resume_file = upload_resume_to_gemini(resume_info)
+            else:
+                app.logger.info("LOG: No resume object found in candidate data.")
+
+        fireflies_data = None
+        if fireflies_url:
+            app.logger.info("LOG: Fireflies URL provided, fetching transcript...")
+            transcript_id = extract_fireflies_transcript_id(fireflies_url)
+            if transcript_id:
+                raw_transcript = fetch_fireflies_transcript(transcript_id)
+                if raw_transcript:
+                    fireflies_data = normalise_fireflies_transcript(raw_transcript)
+                else:
+                    app.logger.warning("!!! WARNING: Failed to fetch Fireflies data, proceeding without it.")
+            else:
+                app.logger.warning("!!! WARNING: Invalid Fireflies URL, proceeding without it.")
+
+        if not all([candidate_data, job_data]):
+            missing = [name for name, d in [("candidate", candidate_data), ("job", job_data)] if not d]
+            return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}'}), 500
+
+        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, model)
 
         if html_summary:
             return jsonify({'success': True, 'html_summary': html_summary, 'candidate_slug': candidate_slug})
@@ -309,13 +320,10 @@ def push_to_recruitcrm():
         if not candidate_slug or not html_summary:
             return jsonify({'error': 'Missing candidate slug or HTML summary'}), 400
 
-        url = f"{RECRUITCRM_BASE_URL}/candidates/{candidate_slug}"
-        # RecruitCRM uses form-data for this specific update, so we use 'files'
+        url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
         files = {'candidate_summary': (None, html_summary)}
 
-        app.logger.info(f"LOG: Pushing summary to {url}")
         response = requests.post(url, files=files, headers=get_recruitcrm_headers())
-        app.logger.info(f"LOG: RecruitCRM push response status: {response.status_code}")
 
         if response.status_code == 200:
             return jsonify({'success': True, 'message': 'Summary pushed to RecruitCRM successfully'})
@@ -327,19 +335,232 @@ def push_to_recruitcrm():
         app.logger.error(f"!!! TOP-LEVEL EXCEPTION in push_to_recruitcrm: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/generate-multiple-candidates', methods=['POST'])
+def generate_multiple_candidates():
+    """Generates content for multiple candidates using multiple-candidates-prompts with CV and interview data."""
+    app.logger.info("\n--- Endpoint Hit: /api/generate-multiple-candidates ---")
+
+    try:
+        data = request.get_json()
+
+        # Extract request data
+        candidate_urls = data.get('candidate_urls', [])
+        prompt_type = data.get('prompt_type', 'candidate-submission')
+        client_name = data.get('client_name', '')
+        job_url = data.get('job_url', '')
+        preferred_candidate = data.get('preferred_candidate', '')
+        additional_context = data.get('additional_context', '')
+
+        # Validate input
+        if not candidate_urls or len(candidate_urls) == 0:
+            return jsonify({'error': 'At least one candidate URL is required'}), 400
+
+        if len(candidate_urls) > 10:  # Safety limit
+            return jsonify({'error': 'Maximum 10 candidates allowed'}), 400
+
+        app.logger.info(f"Processing {len(candidate_urls)} candidates with prompt type: {prompt_type}")
+
+        # Fetch job description if job_url provided
+        job_data = None
+        alpharun_job_id = None
+        if job_url:
+            try:
+                app.logger.info(f"Fetching job description from: {job_url}")
+                job_slug = job_url.split('/')[-1] if '/' in job_url else job_url
+                job_response = fetch_recruitcrm_job(job_slug)
+                if job_response:
+                    job_data = job_response
+                    # Extract AlphaRun job ID for interview fetching
+                    job_details = job_data.get('data', job_data)
+                    for field in job_details.get('custom_fields', []):
+                        if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
+                            alpharun_job_id = field.get('value')
+                            break
+                    app.logger.info("Successfully fetched job description")
+                else:
+                    app.logger.warning("Failed to fetch job description")
+            except Exception as e:
+                app.logger.error(f"Error fetching job description: {e}")
+
+        # Process each candidate with enhanced data collection
+        candidates_data = []
+        failed_candidates = []
+        resume_files = []
+
+        for i, url in enumerate(candidate_urls):
+            try:
+                app.logger.info(f"Processing candidate {i+1}/{len(candidate_urls)}: {url}")
+
+                # Extract slug from URL
+                slug = url.split('/')[-1] if '/' in url else url
+
+                # Fetch basic candidate data
+                candidate_data = fetch_recruitcrm_candidate(slug)
+                if not candidate_data:
+                    failed_candidates.append(url)
+                    app.logger.warning(f"Failed to fetch candidate {i+1}: {url}")
+                    continue
+
+                candidate_details = candidate_data.get('data', candidate_data)
+
+                # Process resume
+                gemini_resume_file = None
+                resume_info = candidate_details.get('resume')
+                if resume_info:
+                    app.logger.info(f"Processing resume for candidate {i+1}")
+                    gemini_resume_file = upload_resume_to_gemini(resume_info)
+                    if gemini_resume_file:
+                        resume_files.append(gemini_resume_file)
+                        app.logger.info(f"Successfully uploaded resume for candidate {i+1}")
+                    else:
+                        app.logger.warning(f"Failed to upload resume for candidate {i+1}")
+                else:
+                    app.logger.info(f"No resume found for candidate {i+1}")
+
+                # Fetch interview data
+                interview_data = None
+                if alpharun_job_id:
+                    for field in candidate_details.get('custom_fields', []):
+                        if isinstance(field, dict) and field.get('field_name') == 'AI Interview ID':
+                            raw_interview_id = field.get('value')
+                            if raw_interview_id:
+                                interview_id = raw_interview_id.split('?')[0]
+                                app.logger.info(f"Fetching interview data for candidate {i+1}")
+                                interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+                                if interview_data:
+                                    app.logger.info(f"Successfully fetched interview for candidate {i+1}")
+                                else:
+                                    app.logger.warning(f"Failed to fetch interview for candidate {i+1}")
+                            break
+                else:
+                    app.logger.info("No AlphaRun job ID available for interview fetching")
+
+                # Store enriched candidate data
+                candidates_data.append({
+                    'basic_data': candidate_data,
+                    'resume_file': gemini_resume_file,
+                    'interview_data': interview_data,
+                    'candidate_number': i + 1
+                })
+
+                app.logger.info(f"Successfully processed candidate {i+1}")
+
+            except Exception as e:
+                app.logger.error(f"Error processing candidate {i+1}: {e}")
+                failed_candidates.append(url)
+
+        if not candidates_data:
+            return jsonify({'error': 'No valid candidate data could be retrieved'}), 400
+
+        # Prepare enhanced data for prompt generation
+        formatted_candidates_data = ""
+        for candidate_info in candidates_data:
+            candidate = candidate_info['basic_data']
+            candidate_details = candidate.get('data', candidate)
+            candidate_num = candidate_info['candidate_number']
+
+            formatted_candidates_data += f"\n**CANDIDATE {candidate_num}:**\n"
+            formatted_candidates_data += f"Name: {candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}\n"
+            formatted_candidates_data += f"Email: {candidate_details.get('email', '')}\n"
+            formatted_candidates_data += f"Phone: {candidate_details.get('mobile_phone', '')}\n"
+
+            # Add custom fields
+            for field in candidate_details.get('custom_fields', []):
+                if isinstance(field, dict) and field.get('value'):
+                    formatted_candidates_data += f"{field.get('field_name', 'Unknown')}: {field.get('value')}\n"
+
+            # Add interview insights if available
+            if candidate_info['interview_data']:
+                interview = candidate_info['interview_data'].get('data', {}).get('interview', {})
+                formatted_candidates_data += f"Interview Status: Completed\n"
+                # Add any other relevant interview fields you want to include
+
+            # Note about resume availability
+            if candidate_info['resume_file']:
+                formatted_candidates_data += f"Resume: Available for AI analysis\n"
+            else:
+                formatted_candidates_data += f"Resume: Not available\n"
+
+            formatted_candidates_data += "\n"
+
+        # Format job data if available
+        formatted_job_data = ""
+        if job_data:
+            job_details = job_data.get('data', job_data)
+            formatted_job_data = f"Job Title: {job_details.get('job_name', '')}\n"
+            formatted_job_data += f"Company: {job_details.get('company_name', '')}\n"
+            formatted_job_data += f"Location: {job_details.get('job_location', '')}\n"
+            formatted_job_data += f"Description: {job_details.get('job_description', '')}\n"
+
+            # Add custom fields
+            for field in job_details.get('custom_fields', []):
+                if isinstance(field, dict) and field.get('value'):
+                    formatted_job_data += f"{field.get('field_name', 'Unknown')}: {field.get('value')}\n"
+
+        # Build prompt using multiple-candidates-prompts
+        prompt_kwargs = {
+            'client_name': client_name,
+            'job_url': job_url,
+            'preferred_candidate': preferred_candidate,
+            'additional_context': additional_context,
+            'candidates_data': formatted_candidates_data,
+            'job_data': formatted_job_data
+        }
+
+        full_prompt = build_full_prompt(prompt_type, "multiple", **prompt_kwargs)
+
+        # Generate content with AI including resumes
+        app.logger.info("Generating AI content for multiple candidates with enhanced data...")
+
+        # Prepare content for Gemini (text + resume files)
+        prompt_contents = [full_prompt]
+        if resume_files:
+            prompt_contents.extend(resume_files)
+            app.logger.info(f"Including {len(resume_files)} resume files in AI generation")
+
+        try:
+            response = model.generate_content(prompt_contents)
+            ai_response = response.text
+        except Exception as e:
+            app.logger.error(f"Error generating AI content: {e}")
+            return jsonify({'error': 'Failed to generate AI content'}), 500
+
+        if not ai_response:
+            return jsonify({'error': 'Failed to generate AI content'}), 500
+
+        # Replace placeholder links if job_url provided
+        final_content = ai_response
+        if job_url:
+            final_content = ai_response.replace('[HERE_LINK]', f'<a href="{job_url}">here</a>')
+
+        app.logger.info("Multiple candidates content generated successfully")
+
+        response = {
+            'success': True,
+            'generated_content': final_content,
+            'candidates_processed': len(candidates_data),
+            'candidates_failed': len(failed_candidates),
+            'failed_urls': failed_candidates,
+            'resumes_processed': len(resume_files),
+            'interviews_processed': sum(1 for c in candidates_data if c['interview_data'])
+        }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        app.logger.error(f"!!! EXCEPTION in generate_multiple_candidates: {e}")
+        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+
 @app.route('/api/log-feedback', methods=['POST'])
 def log_feedback():
     """Receives and logs user feedback on a generated summary to Firestore."""
     app.logger.info("\n--- Endpoint Hit: /api/log-feedback ---")
 
     if not db:
-        app.logger.error("!!! ERROR: Firestore client not initialized. Cannot log feedback.")
         return jsonify({'error': 'Firestore is not configured on the server'}), 500
 
     try:
         data = request.get_json()
-
-        # Prepare the data for Firestore
         feedback_data = {
             'rating': data.get('rating'),
             'comments': data.get('comments', ''),
@@ -349,20 +570,15 @@ def log_feedback():
             'job_slug': data.get('job_slug'),
             'timestamp': datetime.datetime.utcnow()
         }
-
-        # Add a new doc with a generated id to the 'feedback' collection
         feedback_ref = db.collection('feedback').document()
         feedback_ref.set(feedback_data)
-
-        app.logger.info(f"LOG: Feedback logged successfully to Firestore with ID: {feedback_ref.id}")
         return jsonify({'success': True, 'message': 'Feedback logged successfully'}), 200
-
     except Exception as e:
         app.logger.error(f"!!! EXCEPTION in log_feedback: {e}")
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 # ==============================================================================
-# 4. MAIN EXECUTION BLOCK
+# 3. MAIN EXECUTION BLOCK
 # ==============================================================================
 
 if __name__ == '__main__':
