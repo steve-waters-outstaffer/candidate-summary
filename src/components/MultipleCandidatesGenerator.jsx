@@ -18,6 +18,11 @@ import {
     Tab,
     Divider
 } from '@mui/material';
+import {
+    CheckCircle,
+    Cancel,
+    HelpOutline,
+} from '@mui/icons-material';
 
 const CustomColors = {
     SecretGarden: '#5a9a5a',
@@ -411,6 +416,15 @@ const MultipleCandidatesGenerator = () => {
         setView(newValue);
     };
 
+    const getStatusIcon = (status) => {
+        switch (status) {
+            case 'success': return <CheckCircle sx={{ color: CustomColors.SecretGarden }} />;
+            case 'error': return <Cancel sx={{ color: CustomColors.DarkRed }} />;
+            case 'loading': return <CircularProgress size={24} />;
+            default: return <HelpOutline sx={{ color: CustomColors.UIGrey500 }} />;
+        }
+    };
+
     const getStatusColor = (status) => {
         switch (status) {
             case 'success': return CustomColors.SecretGarden;
@@ -436,24 +450,33 @@ const MultipleCandidatesGenerator = () => {
         if (!hasUrl) return null;
 
         return (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 2, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Candidate Profile:</Typography>
-                    <Typography variant="body2" sx={{ color: getStatusColor(status?.candidate?.status || 'pending') }}>
-                        {status?.candidate?.message || 'Pending confirmation'}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {getStatusIcon(status?.candidate?.status)}
+                        <Typography variant="body2" sx={{ color: getStatusColor(status?.candidate?.status) }}>
+                            {status?.candidate?.message || 'Pending confirmation'}
+                        </Typography>
+                    </Box>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Resume:</Typography>
-                    <Typography variant="body2" sx={{ color: getStatusColor(status?.resume?.status || 'pending') }}>
-                        {status?.resume?.message || 'Pending candidate'}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {getStatusIcon(status?.resume?.status)}
+                        <Typography variant="body2" sx={{ color: getStatusColor(status?.resume?.status) }}>
+                            {status?.resume?.message || 'Pending candidate'}
+                        </Typography>
+                    </Box>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Anna AI Interview:</Typography>
-                    <Typography variant="body2" sx={{ color: getStatusColor(status?.interview?.status || 'pending') }}>
-                        {status?.interview?.message || 'Pending candidate'}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {getStatusIcon(status?.interview?.status)}
+                        <Typography variant="body2" sx={{ color: getStatusColor(status?.interview?.status) }}>
+                            {status?.interview?.message || 'Pending candidate'}
+                        </Typography>
+                    </Box>
                 </Box>
             </Box>
         );
@@ -518,7 +541,7 @@ const MultipleCandidatesGenerator = () => {
                             </Box>
 
                             {/* Candidate URLs */}
-                            <Typography variant="h6" sx={{ mb: 2 }}>Candidate URLs</Typography>
+                            <Typography variant="h6" sx={{ mb: 2 }}>Candidates</Typography>
                             {candidateUrls.map((_, index) => renderCandidateUrlField(index))}
 
                             <Divider sx={{ my: Spacing.Medium }} />
@@ -562,6 +585,15 @@ const MultipleCandidatesGenerator = () => {
                                 sx={{ mb: 2 }}
                             />
 
+                            <TextField
+                                label="Outstaffer Platform URL (Optional)"
+                                value={formData.outstaffer_platform_url}
+                                onChange={(e) => handleInputChange('outstaffer_platform_url', e.target.value)}
+                                fullWidth
+                                sx={{ mb: 2 }}
+                                placeholder="Link to embed in email..."
+                            />
+
                             <FormControl fullWidth sx={{ mb: 2 }}>
                                 <InputLabel>Template</InputLabel>
                                 <Select
@@ -576,15 +608,6 @@ const MultipleCandidatesGenerator = () => {
                                     ))}
                                 </Select>
                             </FormControl>
-
-                            <TextField
-                                label="Outstaffer Platform URL (Optional)"
-                                value={formData.outstaffer_platform_url}
-                                onChange={(e) => handleInputChange('outstaffer_platform_url', e.target.value)}
-                                fullWidth
-                                sx={{ mb: 2 }}
-                                placeholder="Link to embed in email..."
-                            />
 
                             <Button
                                 variant="contained"
