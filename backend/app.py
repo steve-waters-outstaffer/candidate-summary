@@ -18,6 +18,7 @@ from helpers import (
     fetch_recruitcrm_candidate,
     fetch_recruitcrm_job,
     fetch_alpharun_interview,
+    fetch_candidate_interview_id,
     extract_fireflies_transcript_id,
     fetch_fireflies_transcript,
     normalise_fireflies_transcript,
@@ -374,6 +375,9 @@ def generate_multiple_candidates():
                 alpharun_job_id = field.get('value')
                 break
 
+        if not alpharun_job_id:
+            app.logger.warning(f"Missing AI Job ID for job {job_slug}; AlphaRun interviews will be skipped.")
+
         # Fetch all candidates for the job at once to get the rich data
         all_job_candidates = fetch_recruitcrm_assigned_candidates(job_slug)
 
@@ -402,12 +406,18 @@ def generate_multiple_candidates():
                     resume_files.append(gemini_resume_file)
 
             interview_data = None
+            interview_id = None
             if alpharun_job_id:
                 for field in candidate_details.get('custom_fields', []):
                     if field.get('field_name') == 'AI Interview ID' and field.get('value'):
                         interview_id = field.get('value').split('?')[0]
-                        interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                         break
+                if not interview_id:
+                    interview_id = fetch_candidate_interview_id(slug)
+                if interview_id:
+                    interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+                else:
+                    app.logger.warning(f"Missing AI Interview ID for candidate {slug}; skipping AlphaRun call.")
 
             candidates_data.append({
                 'basic_data': {'data': candidate_details}, # Keep the nested 'data' structure
@@ -493,6 +503,9 @@ def bulk_process_job():
                 alpharun_job_id = field.get('value')
                 break
 
+        if not alpharun_job_id:
+            app.logger.warning(f"Missing AI Job ID for job {job_slug}; AlphaRun interviews will be skipped.")
+
         candidates = fetch_recruitcrm_assigned_candidates(job_slug, status_id)
         if not candidates:
             return jsonify({'success': True, 'message': f"No candidates found."}), 200
@@ -521,12 +534,18 @@ def bulk_process_job():
                     gemini_resume_file = upload_resume_to_gemini(resume_info)
 
                 interview_data = None
+                interview_id = None
                 if alpharun_job_id:
                     for field in full_candidate_data.get('custom_fields', []):
                         if field.get('field_name') == 'AI Interview ID' and field.get('value'):
                             interview_id = field.get('value').split('?')[0]
-                            interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                             break
+                    if not interview_id:
+                        interview_id = fetch_candidate_interview_id(slug)
+                    if interview_id:
+                        interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+                    else:
+                        app.logger.warning(f"Missing AI Interview ID for candidate {slug}; skipping AlphaRun call.")
 
                 summary_input_data = {'data': full_candidate_data}
                 summary = generate_html_summary(summary_input_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, model)
