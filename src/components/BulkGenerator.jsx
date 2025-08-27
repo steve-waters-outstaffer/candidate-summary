@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box,
     Card,
@@ -26,6 +26,7 @@ import {
     Divider
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { debounce } from 'lodash';
 
 const BulkGenerator = () => {
     const [jobUrl, setJobUrl] = useState('');
@@ -36,6 +37,7 @@ const BulkGenerator = () => {
     const [generateEmail, setGenerateEmail] = useState(true);
     const [autoPush, setAutoPush] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [stagesLoading, setStagesLoading] = useState(false);
     const [alert, setAlert] = useState({ show: false, type: 'info', message: '' });
     const [availablePrompts, setAvailablePrompts] = useState({ single: [], multiple: [] });
     const [activeStep, setActiveStep] = useState(-1);
@@ -49,10 +51,16 @@ const BulkGenerator = () => {
     }, []);
 
     const fetchJobStagesWithCounts = async (url) => {
-        if (!url.includes('/job/')) return;
-        const jobSlug = url.split('/job/')[1];
-        if (!jobSlug) return;
+        // Regex to extract slug from various RecruitCRM job URL formats
+        const slugMatch = url.match(/\/job(?:s)?\/([a-zA-Z0-9]+)/);
+        if (!slugMatch || !slugMatch[1]) {
+            setJobStages([]);
+            setSelectedStage('');
+            return;
+        }
+        const jobSlug = slugMatch[1];
 
+        setStagesLoading(true);
         try {
             const response = await fetch(`${API_BASE_URL}/api/job-stages-with-counts/${jobSlug}`);
             if (response.ok) {
@@ -60,22 +68,31 @@ const BulkGenerator = () => {
                 setJobStages(stages);
                 if (stages.length > 0) {
                     setSelectedStage(stages[0].status_id);
+                } else {
+                    showAlert('info', 'No candidates found in any active stage for this job.');
+                    setSelectedStage('');
                 }
             } else {
                 setJobStages([]);
                 setSelectedStage('');
+                showAlert('error', 'Could not fetch candidate stages for this job.');
             }
         } catch (error) {
             console.error('Error fetching job stages:', error);
             setJobStages([]);
             setSelectedStage('');
+        } finally {
+            setStagesLoading(false);
         }
     };
+
+    // Debounce the fetch function to avoid excessive API calls while typing
+    const debouncedFetchJobStages = useCallback(debounce(fetchJobStagesWithCounts, 500), []);
 
     const handleJobUrlChange = (e) => {
         const url = e.target.value;
         setJobUrl(url);
-        fetchJobStagesWithCounts(url);
+        debouncedFetchJobStages(url);
     };
 
     const fetchAvailablePrompts = async (category) => {
@@ -96,8 +113,8 @@ const BulkGenerator = () => {
     };
 
     const handleBulkProcess = async () => {
-        if (!jobUrl.trim()) {
-            showAlert('error', 'Please provide a Job URL');
+        if (!jobUrl.trim() || !selectedStage) {
+            showAlert('error', 'Please provide a Job URL and select a stage.');
             return;
         }
 
@@ -161,16 +178,18 @@ const BulkGenerator = () => {
                             onChange={handleJobUrlChange}
                             fullWidth
                             sx={{ mb: 2 }}
-                            placeholder="Paste the job URL here..."
+                            placeholder="Paste a RecruitCRM job URL..."
                         />
 
                         <FormControl fullWidth sx={{ mb: 2 }}>
-                            <InputLabel>Hiring Stage</InputLabel>
+                            <InputLabel id="hiring-stage-label">Hiring Stage</InputLabel>
                             <Select
+                                labelId="hiring-stage-label"
                                 value={selectedStage}
                                 onChange={(e) => setSelectedStage(e.target.value)}
                                 label="Hiring Stage"
-                                disabled={jobStages.length === 0}
+                                disabled={stagesLoading || jobStages.length === 0}
+                                startAdornment={stagesLoading && <CircularProgress size={20} sx={{ mr: 1 }} />}
                             >
                                 {jobStages.map((stage) => (
                                     <MenuItem key={stage.status_id} value={stage.status_id}>
@@ -226,7 +245,7 @@ const BulkGenerator = () => {
                             variant="contained"
                             color="primary"
                             onClick={handleBulkProcess}
-                            disabled={loading || !selectedStage}
+                            disabled={loading || stagesLoading || !selectedStage}
                             fullWidth
                             sx={{ mt: 2 }}
                         >
