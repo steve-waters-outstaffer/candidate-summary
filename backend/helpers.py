@@ -75,11 +75,26 @@ def fetch_candidate_interview_id(slug):
             break
     return None
 
-def fetch_recruitcrm_job(slug):
-    """Fetches job data from RecruitCRM using the job's slug."""
+def fetch_recruitcrm_job(slug, include_custom_fields=True):
+    """Fetches job data from RecruitCRM using the job's slug.
+
+    Args:
+        slug (str): The job slug/ID in RecruitCRM.
+        include_custom_fields (bool): Whether to request custom fields as part of
+            the response. Defaults to ``True``.
+
+    Returns:
+        dict | None: The JSON response from RecruitCRM, or ``None`` if the
+        request fails.
+    """
     url = f'https://api.recruitcrm.io/v1/jobs/{slug}'
+    params = {'include': 'custom_fields'} if include_custom_fields else None
     try:
-        response = requests.get(url, headers=get_recruitcrm_headers())
+        response = requests.get(
+            url,
+            headers=get_recruitcrm_headers(),
+            params=params
+        )
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
