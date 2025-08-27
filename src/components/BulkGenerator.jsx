@@ -29,6 +29,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 const BulkGenerator = () => {
     const [jobUrl, setJobUrl] = useState('');
+    const [jobStages, setJobStages] = useState([]);
+    const [selectedStage, setSelectedStage] = useState('');
     const [singleCandidatePrompt, setSingleCandidatePrompt] = useState('');
     const [multiCandidatePrompt, setMultiCandidatePrompt] = useState('');
     const [generateEmail, setGenerateEmail] = useState(true);
@@ -45,6 +47,36 @@ const BulkGenerator = () => {
         fetchAvailablePrompts('single');
         fetchAvailablePrompts('multiple');
     }, []);
+
+    const fetchJobStagesWithCounts = async (url) => {
+        if (!url.includes('/job/')) return;
+        const jobSlug = url.split('/job/')[1];
+        if (!jobSlug) return;
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/job-stages-with-counts/${jobSlug}`);
+            if (response.ok) {
+                const stages = await response.json();
+                setJobStages(stages);
+                if (stages.length > 0) {
+                    setSelectedStage(stages[0].status_id);
+                }
+            } else {
+                setJobStages([]);
+                setSelectedStage('');
+            }
+        } catch (error) {
+            console.error('Error fetching job stages:', error);
+            setJobStages([]);
+            setSelectedStage('');
+        }
+    };
+
+    const handleJobUrlChange = (e) => {
+        const url = e.target.value;
+        setJobUrl(url);
+        fetchJobStagesWithCounts(url);
+    };
 
     const fetchAvailablePrompts = async (category) => {
         if (!API_BASE_URL) return;
@@ -84,7 +116,8 @@ const BulkGenerator = () => {
                     single_candidate_prompt: singleCandidatePrompt,
                     multi_candidate_prompt: multiCandidatePrompt,
                     generate_email: generateEmail,
-                    auto_push: autoPush
+                    auto_push: autoPush,
+                    status_id: selectedStage
                 })
             });
 
@@ -125,11 +158,27 @@ const BulkGenerator = () => {
                         <TextField
                             label="RecruitCRM Job URL"
                             value={jobUrl}
-                            onChange={(e) => setJobUrl(e.target.value)}
+                            onChange={handleJobUrlChange}
                             fullWidth
                             sx={{ mb: 2 }}
                             placeholder="Paste the job URL here..."
                         />
+
+                        <FormControl fullWidth sx={{ mb: 2 }}>
+                            <InputLabel>Hiring Stage</InputLabel>
+                            <Select
+                                value={selectedStage}
+                                onChange={(e) => setSelectedStage(e.target.value)}
+                                label="Hiring Stage"
+                                disabled={jobStages.length === 0}
+                            >
+                                {jobStages.map((stage) => (
+                                    <MenuItem key={stage.status_id} value={stage.status_id}>
+                                        {`${stage.label} (${stage.candidate_count})`}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
 
                         <FormControl fullWidth sx={{ mb: 2 }}>
                             <InputLabel>Individual Summary Prompt</InputLabel>
@@ -177,7 +226,7 @@ const BulkGenerator = () => {
                             variant="contained"
                             color="primary"
                             onClick={handleBulkProcess}
-                            disabled={loading}
+                            disabled={loading || !selectedStage}
                             fullWidth
                             sx={{ mt: 2 }}
                         >

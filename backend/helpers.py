@@ -68,7 +68,18 @@ def fetch_recruitcrm_job(slug):
         logging.error(f"Error fetching RecruitCRM job {slug}: {e}")
         return None
 
-def fetch_recruitcrm_assigned_candidates(job_slug, status_id='622817'):
+def fetch_hiring_pipeline():
+    """Fetches the entire hiring pipeline (all possible stages)."""
+    url = "https://api.recruitcrm.io/v1/hiring-pipeline"
+    try:
+        response = requests.get(url, headers=get_recruitcrm_headers())
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching hiring pipeline: {e}")
+        return []
+
+def fetch_recruitcrm_assigned_candidates(job_slug, status_id=None):
     """Fetches assigned candidates for a job from RecruitCRM."""
     url = f"https://api.recruitcrm.io/v1/jobs/{job_slug}/assigned-candidates"
     params = {'status_id': status_id} if status_id else {}

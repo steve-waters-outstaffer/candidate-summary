@@ -5,6 +5,7 @@ import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+from collections import defaultdict
 # Load environment variables from a .env file
 load_dotenv()
 import google.generativeai as genai
@@ -24,7 +25,8 @@ from helpers import (
     generate_html_summary,
     generate_ai_response,
     get_recruitcrm_headers,
-    fetch_recruitcrm_assigned_candidates
+    fetch_recruitcrm_assigned_candidates,
+    fetch_hiring_pipeline
 )
 
 # ==============================================================================
@@ -105,6 +107,42 @@ def list_prompts():
     except Exception as e:
         app.logger.error(f"!!! EXCEPTION in list_prompts: {e}")
         return jsonify({'error': 'Could not retrieve prompt list from server'}), 500
+
+@app.route('/api/job-stages-with-counts/<job_slug>', methods=['GET'])
+def get_job_stages_with_counts(job_slug):
+    """
+    Fetches all candidates for a job, counts them by stage, and returns
+    a list of stages that have at least one candidate.
+    """
+    app.logger.info(f"\n--- Endpoint Hit: /api/job-stages-with-counts/{job_slug} ---")
+
+    # First, get all candidates for the job
+    all_candidates = fetch_recruitcrm_assigned_candidates(job_slug)
+    if not all_candidates:
+        return jsonify({'error': 'No candidates found for this job or job not found.'}), 404
+
+    # Count candidates in each stage
+    stage_counts = defaultdict(int)
+    for candidate_data in all_candidates:
+        status_id = candidate_data.get('status', {}).get('status_id')
+        if status_id:
+            stage_counts[status_id] += 1
+
+    # Get the full list of possible hiring stages
+    pipeline = fetch_hiring_pipeline()
+    if not pipeline:
+        return jsonify({'error': 'Could not fetch the hiring pipeline.'}), 500
+
+    # Filter the pipeline to only include stages that have candidates
+    stages_with_counts = []
+    for stage in pipeline:
+        count = stage_counts.get(stage['status_id'], 0)
+        if count > 0:
+            stage['candidate_count'] = count
+            stages_with_counts.append(stage)
+
+    return jsonify(stages_with_counts), 200
+
 
 @app.route('/api/test-candidate', methods=['POST'])
 def test_candidate():
@@ -569,7 +607,7 @@ def bulk_process_job():
     multi_prompt = data.get('multi_candidate_prompt')
     generate_email = data.get('generate_email', False)
     auto_push = data.get('auto_push', False)
-    status_id = data.get('status_id', '622817')
+    status_id = data.get('status_id')
 
     if not job_url or not single_prompt:
         return jsonify({'error': 'Missing job_url or single_candidate_prompt'}), 400
@@ -579,6 +617,13 @@ def bulk_process_job():
         job_data = fetch_recruitcrm_job(job_slug)
         if not job_data:
             return jsonify({'error': f"Could not fetch job data for slug: {job_slug}"}), 404
+
+        job_details = job_data.get('data', job_data)
+        alpharun_job_id = None
+        for field in job_details.get('custom_fields', []):
+            if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
+                alpharun_job_id = field.get('value')
+                break
 
         candidates = fetch_recruitcrm_assigned_candidates(job_slug, status_id)
         if not candidates:
@@ -597,7 +642,6 @@ def bulk_process_job():
         candidate_urls_for_email = []
 
         for cand_info in candidates:
-            # Correctly extract the slug from the nested 'candidate' object
             candidate_details = cand_info.get('candidate', {})
             slug = candidate_details.get('slug')
             name = f"{candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}".strip()
@@ -610,19 +654,33 @@ def bulk_process_job():
             candidate_urls_for_email.append(f"https://app.recruitcrm.io/v1/candidates/{slug}")
 
             try:
-                # The `candidate_details` from the assigned list is often enough,
-                # but fetching the full record ensures all custom fields are present.
                 full_candidate_data = fetch_recruitcrm_candidate(slug)
                 if not full_candidate_data:
                     failed_candidates[name or slug] = "Failed to fetch full candidate data."
                     continue
 
+                full_candidate_details = full_candidate_data.get('data', {})
+
+                # Resume processing
                 gemini_resume_file = None
-                resume_info = full_candidate_data.get('data', {}).get('resume')
+                resume_info = full_candidate_details.get('resume')
                 if resume_info:
                     gemini_resume_file = upload_resume_to_gemini(resume_info)
 
-                summary = generate_html_summary(full_candidate_data, job_data, None, "", single_prompt, None, gemini_resume_file, model)
+                # Interview Processing
+                interview_data = None
+                if alpharun_job_id:
+                    for field in full_candidate_details.get('custom_fields', []):
+                        if isinstance(field, dict) and field.get('field_name') == 'AI Interview ID':
+                            raw_interview_id = field.get('value')
+                            if raw_interview_id:
+                                interview_id = raw_interview_id.split('?')[0]
+                                interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+                                if not interview_data:
+                                    app.logger.warning(f"Could not fetch interview for {name}")
+                            break
+
+                summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, model)
 
                 if summary:
                     processed_summaries[name or slug] = summary
@@ -641,7 +699,7 @@ def bulk_process_job():
             email_request_body = {
                 "candidate_urls": candidate_urls_for_email,
                 "prompt_type": multi_prompt,
-                "client_name": job_data.get('data', {}).get('company', {}).get('name', 'Valued Client'),
+                "client_name": job_details.get('company', {}).get('name', 'Valued Client'),
                 "job_url": job_url,
             }
             with app.test_request_context('/api/generate-multiple-candidates', method='POST', json=email_request_body):
@@ -652,7 +710,7 @@ def bulk_process_job():
 
         return jsonify({
             'success': True,
-            'job_title': job_data.get('data', {}).get('name'),
+            'job_title': job_details.get('name'),
             'candidates_found': len(candidates),
             'summaries_generated': len(processed_summaries),
             'summaries': processed_summaries,
