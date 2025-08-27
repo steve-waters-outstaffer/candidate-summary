@@ -1,272 +1,207 @@
 import os
-import re
-import requests
 import logging
-import io
+import requests
+import mimetypes
 from urllib.parse import urlparse
 import google.generativeai as genai
-from file_converter import convert_to_supported_format, UnsupportedFileTypeError
 from config.prompts import build_full_prompt
 
-# ==============================================================================
-# LOGGING & API CONFIGURATION
-# ==============================================================================
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-RECRUITCRM_BASE_URL = "https://api.recruitcrm.io/v1"
-ALPHARUN_BASE_URL = "https://api.alpharun.com/api/v1"
-FIREFLIES_GRAPHQL_URL = "https://api.fireflies.ai/graphql"
-
+# --- Environment Variable Checks ---
 RECRUITCRM_API_KEY = os.getenv('RECRUITCRM_API_KEY')
 ALPHARUN_API_KEY = os.getenv('ALPHARUN_API_KEY')
 FIREFLIES_API_KEY = os.getenv('FIREFLIES_API_KEY')
 
 # ==============================================================================
-# API HEADER FUNCTIONS
+# 1. AUTHENTICATION HELPERS
 # ==============================================================================
 
 def get_recruitcrm_headers():
-    """Returns the authorization headers for RecruitCRM."""
+    """Returns the authorization headers for the RecruitCRM API."""
+    if not RECRUITCRM_API_KEY:
+        raise ValueError("RECRUITCRM_API_KEY is not set in the environment.")
     return {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {RECRUITCRM_API_KEY}"
+        'Authorization': f'Bearer {RECRUITCRM_API_KEY}',
+        'Content-Type': 'application/json'
     }
 
 def get_alpharun_headers():
-    """Returns the authorization headers for AlphaRun."""
+    """Returns the authorization headers for the AlphaRun API."""
+    if not ALPHARUN_API_KEY:
+        raise ValueError("ALPHARUN_API_KEY is not set in the environment.")
     return {
-        "Authorization": f"Bearer {ALPHARUN_API_KEY}"
+        'Authorization': f'Bearer {ALPHARUN_API_KEY}',
+        'Content-Type': 'application/json'
+    }
+
+def get_fireflies_headers():
+    """Returns the authorization headers for the Fireflies.ai API."""
+    if not FIREFLIES_API_KEY:
+        raise ValueError("FIREFLIES_API_KEY is not set in the environment.")
+    return {
+        'Authorization': f'Bearer {FIREFLIES_API_KEY}',
+        'Content-Type': 'application/json'
     }
 
 # ==============================================================================
-# RECRUITCRM API FUNCTIONS
+# 2. DATA FETCHING HELPERS
 # ==============================================================================
 
 def fetch_recruitcrm_candidate(slug):
-    """Fetches a single candidate record from RecruitCRM."""
-    url = f"{RECRUITCRM_BASE_URL}/candidates/{slug}"
-    logger.info(f"LOG: Fetching candidate from {url}")
+    """Fetches candidate data from RecruitCRM using the candidate's slug."""
+    url = f'https://api.recruitcrm.io/v1/candidates/{slug}'
     try:
         response = requests.get(url, headers=get_recruitcrm_headers())
-        logger.info(f"LOG: RecruitCRM candidate API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logger.error(f"!!! ERROR: RecruitCRM candidate API failed. Body: {response.text}")
-            return None
+        response.raise_for_status()
+        return response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f"!!! EXCEPTION during candidate fetch: {e}")
+        logging.error(f"Error fetching RecruitCRM candidate {slug}: {e}")
         return None
 
 def fetch_recruitcrm_job(slug):
-    """Fetches a single job record from RecruitCRM."""
-    url = f"{RECRUITCRM_BASE_URL}/jobs/{slug}"
-    logger.info(f"LOG: Fetching job from {url}")
+    """Fetches job data from RecruitCRM using the job's slug."""
+    url = f'https://api.recruitcrm.io/v1/jobs/{slug}'
     try:
         response = requests.get(url, headers=get_recruitcrm_headers())
-        logger.info(f"LOG: RecruitCRM job API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logger.error(f"!!! ERROR: RecruitCRM job API failed. Body: {response.text}")
-            return None
+        response.raise_for_status()
+        return response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f"!!! EXCEPTION during job fetch: {e}")
+        logging.error(f"Error fetching RecruitCRM job {slug}: {e}")
         return None
 
-# ==============================================================================
-# ALPHARUN API FUNCTIONS
-# ==============================================================================
+def fetch_recruitcrm_assigned_candidates(job_slug, status_id='622817'):
+    """Fetches assigned candidates for a job from RecruitCRM."""
+    url = f"https://api.recruitcrm.io/v1/jobs/{job_slug}/assigned-candidates"
+    params = {'status_id': status_id} if status_id else {}
+    try:
+        response = requests.get(url, headers=get_recruitcrm_headers(), params=params)
+        response.raise_for_status()
+        logging.info(f"Successfully fetched candidates for job {job_slug} with status {status_id}")
+        return response.json().get('data', [])
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching assigned candidates for job {job_slug}: {e}")
+        return []
 
 def fetch_alpharun_interview(job_opening_id, interview_id):
-    """Fetches interview data from AlphaRun using the job opening ID."""
-    url = f"{ALPHARUN_BASE_URL}/job-openings/{job_opening_id}/interviews/{interview_id}"
-    logger.info(f"LOG: Fetching interview from {url}")
+    """Fetches interview data from AlphaRun."""
+    url = f"https://alpharun.com/api/v1/job_openings/{job_opening_id}/interviews/{interview_id}"
     try:
         response = requests.get(url, headers=get_alpharun_headers())
-        logger.info(f"LOG: AlphaRun interview API status: {response.status_code}")
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logger.error(f"!!! ERROR: AlphaRun interview API failed. Body: {response.text}")
-            return None
+        response.raise_for_status()
+        return response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f"!!! EXCEPTION during interview fetch: {e}")
+        logging.error(f"Error fetching AlphaRun interview {interview_id}: {e}")
         return None
 
-# ==============================================================================
-# FIREFLIES.AI API FUNCTIONS
-# ==============================================================================
-
-ULID_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
-
-def extract_fireflies_transcript_id(s: str) -> str | None:
-    """Parses a string to find a Fireflies transcript ID."""
-    s = s.strip()
-    if s.startswith("http://") or s.startswith("https://"):
-        try:
-            path_segment = urlparse(s).path.rsplit("/", 1)[-1]
-            parts = path_segment.split("::")
-            if len(parts) == 2 and ULID_PATTERN.fullmatch(parts[1]):
-                return parts[1]
-        except (IndexError, ValueError):
-            return None
-    if ULID_PATTERN.fullmatch(s):
-        return s
+def extract_fireflies_transcript_id(url):
+    """Extracts the transcript ID from a Fireflies.ai meeting URL."""
+    try:
+        path_segments = urlparse(url).path.split('/')
+        if 'transcript' in path_segments:
+            return path_segments[path_segments.index('transcript') + 1]
+    except (ValueError, IndexError) as e:
+        logging.error(f"Could not extract transcript ID from URL {url}: {e}")
     return None
 
-def fetch_fireflies_transcript(transcript_id: str) -> dict:
-    """Fetches a transcript from the Fireflies GraphQL API using the server's API key."""
-    headers = {
-        "Authorization": f"Bearer {FIREFLIES_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    query = """
-    query Transcript($id: String!) {
-      transcript(id: $id) {
-        id title date duration transcript_url
-        speakers { id name }
-        sentences { index speaker_name start_time end_time text }
-      }
-    }
-    """
-    variables = {"id": transcript_id}
-    logger.info(f"LOG: Fetching Fireflies transcript ID: {transcript_id}")
+def fetch_fireflies_transcript(transcript_id):
+    """Fetches a transcript from Fireflies.ai using its ID."""
+    url = f"https://api.fireflies.ai/v1/transcript/{transcript_id}"
     try:
-        resp = requests.post(
-            FIREFLIES_GRAPHQL_URL,
-            json={"query": query, "variables": variables},
-            headers=headers,
-            timeout=30
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-        if "errors" in payload:
-            logger.error(f"!!! ERROR: Fireflies GraphQL error: {payload['errors']}")
-            return None
-        return payload.get("data", {}).get("transcript")
+        response = requests.get(url, headers=get_fireflies_headers())
+        response.raise_for_status()
+        return response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f"!!! EXCEPTION during Fireflies fetch: {e}")
+        logging.error(f"Error fetching Fireflies transcript {transcript_id}: {e}")
         return None
 
-def normalise_fireflies_transcript(tr: dict) -> dict:
-    """Produces a compact, LLM-ready JSON from the raw transcript data."""
-    logger.info("LOG: Normalising Fireflies transcript for LLM.")
-    speakers = [s.get("name") for s in (tr.get("speakers") or []) if s and s.get("name")]
-    lines = []
-    for s in (tr.get("sentences") or []):
-        speaker = s.get("speaker_name") or "Unknown"
-        text = s.get("text") or ""
-        lines.append(f"{speaker}: {text}".strip())
+# ==============================================================================
+# 3. DATA PROCESSING & GENERATION HELPERS
+# ==============================================================================
+
+def normalise_fireflies_transcript(raw_transcript):
+    """Normalises raw Fireflies transcript data into a structured format for the AI model."""
+    if not raw_transcript:
+        return {'metadata': {}, 'content': "Not provided."}
+
+    title = raw_transcript.get('title', 'N/A')
+    sentences = raw_transcript.get('sentences', [])
+    content = '\n'.join([f"{s.get('speaker_name', 'Unknown')}: {s.get('text', '')}" for s in sentences])
 
     return {
-        "metadata": {
-            "title": tr.get("title"),
-            "url": tr.get("transcript_url"),
-            "speakers": speakers,
-        },
-        "content": "\n".join(lines),
+        'metadata': {'title': title},
+        'content': content or "Transcript content is empty."
     }
 
-# ==============================================================================
-# GOOGLE GEMINI API FUNCTIONS
-# ==============================================================================
-
-def upload_resume_to_gemini(resume_data: dict) -> dict | None:
-    """
-    Downloads a resume, converts it to a supported format if necessary,
-    and uploads it to the Gemini File API.
-    Returns the file object from the Gemini API if successful.
-    """
-    if not resume_data or 'file_link' not in resume_data or 'filename' not in resume_data:
-        logger.info("LOG: No valid resume data provided.")
+def upload_resume_to_gemini(resume_info):
+    """Downloads a resume, determines its MIME type, and uploads it to the Gemini API."""
+    if not resume_info or not resume_info.get('url'):
+        logging.warning("No resume URL provided in resume_info.")
         return None
-
-    file_link = resume_data['file_link']
-    filename = resume_data['filename']
-    logger.info(f"LOG: Attempting to process resume: {filename}")
-
     try:
-        # 1. Download the resume file from RecruitCRM
-        response = requests.get(file_link, timeout=30)
-        response.raise_for_status()
-        resume_bytes = response.content
-        logger.info(f"LOG: Successfully downloaded {filename} from RecruitCRM.")
+        resume_url = resume_info['url']
+        file_response = requests.get(resume_url)
+        file_response.raise_for_status()
 
-        # 2. Convert the file to a supported format (e.g., text/plain) if needed
-        try:
-            converted_bytes, supported_mime_type = convert_to_supported_format(
-                file_bytes=resume_bytes,
-                original_filename=filename
-            )
-            logger.info(f"LOG: File '{filename}' processed for upload with MIME type '{supported_mime_type}'.")
-        except UnsupportedFileTypeError as e:
-            # Log a warning but don't crash the whole process.
-            # The summary generation will proceed without the resume.
-            logger.warning(f"!!! WARNING: Could not process resume. {e}")
-            return None
+        content_type = file_response.headers.get('Content-Type')
+        filename = resume_info.get('filename', 'resume.bin')
 
-        # 3. Upload the processed file content to the Gemini File API
+        # If Content-Type is not available, guess from filename
+        if not content_type:
+            content_type, _ = mimetypes.guess_type(filename)
+            if not content_type:
+                content_type = 'application/octet-stream' # Default fallback
+                logging.warning(f"Could not determine MIME type for {filename}, using {content_type}.")
+
+        logging.info(f"Uploading '{filename}' with MIME type '{content_type}' to Gemini.")
+
+        # Using the Gemini File API
         gemini_file = genai.upload_file(
-            path=io.BytesIO(converted_bytes),
+            path=file_response.content,
             display_name=filename,
-            mime_type=supported_mime_type # <-- Use the new supported mime type
+            mime_type=content_type
         )
-        logger.info(f"LOG: Successfully uploaded resume to Gemini. URI: {gemini_file.uri}")
-
+        logging.info(f"Completed uploading '{gemini_file.display_name}' to Gemini.")
         return gemini_file
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"!!! EXCEPTION during resume download: {e}")
+        logging.error(f"Error downloading resume: {e}")
         return None
     except Exception as e:
-        # This will catch errors from the Gemini API upload itself
-        logger.error(f"!!! EXCEPTION during resume upload to Gemini: {e}")
+        logging.error(f"An unexpected error occurred during resume upload: {e}")
         return None
 
-def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data=None, gemini_resume_file=None, model=None):
-    """Generate HTML summary using Google Gemini and clean the response."""
-    logger.info(f"LOG: Generating HTML summary with Gemini using prompt type: {prompt_type}")
+def generate_ai_response(model, prompt_parts):
+    """Generates a response from the AI model."""
+    try:
+        response = model.generate_content(prompt_parts)
+        return response.text
+    except Exception as e:
+        logging.error(f"Error during AI content generation: {e}")
+        return None
 
-    prompt_text = build_full_prompt(
-        prompt_type=prompt_type,
-        candidate_data=candidate_data,
-        job_data=job_data,
-        interview_data=interview_data,
+def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, model):
+    """Builds the full prompt and generates an HTML summary using the AI model."""
+
+    # Prepare data for formatting
+    candidate_details = candidate_data.get('data', candidate_data)
+    job_details = job_data.get('data', job_data)
+    interview_details = interview_data.get('data', interview_data) if interview_data else {}
+
+    # Build the prompt with all available data
+    full_prompt = build_full_prompt(
+        prompt_type,
+        "single",
+        candidate_data=candidate_details,
+        job_data=job_details,
+        interview_data=interview_details,
         additional_context=additional_context,
         fireflies_data=fireflies_data
     )
 
-    prompt_contents = [prompt_text]
-
+    # Construct the content parts for the AI model
+    prompt_parts = [full_prompt]
     if gemini_resume_file:
-        prompt_contents.append(gemini_resume_file)
-        logger.info("LOG: Appending resume file to Gemini prompt.")
+        prompt_parts.append(gemini_resume_file)
+        logging.info("Resume file included in the prompt for AI generation.")
 
-    try:
-        response = model.generate_content(prompt_contents)
-        raw_html = response.text
-        logger.info("LOG: Cleaning Gemini response.")
-        cleaned_html = raw_html.strip()
-        if cleaned_html.startswith("```html"):
-            cleaned_html = cleaned_html[7:]
-        if cleaned_html.endswith("```"):
-            cleaned_html = cleaned_html[:-3]
-        return cleaned_html.strip()
-    except Exception as e:
-        logger.error(f"!!! EXCEPTION during Gemini summary generation: {e}")
-        return None
-
-def generate_ai_response(prompt_text: str, files: list = None, model=None) -> str | None:
-    """Generates a response from the AI model, optionally with files."""
-    logger.info("Generating AI response...")
-    try:
-        contents = [prompt_text]
-        if files:
-            contents.extend(files)
-        response = model.generate_content(contents)
-        return response.text
-    except Exception as e:
-        logger.error(f"EXCEPTION during AI response generation: {e}")
-        return None
+    # Generate the AI response
+    return generate_ai_response(model, prompt_parts)

@@ -23,7 +23,8 @@ from helpers import (
     upload_resume_to_gemini,
     generate_html_summary,
     generate_ai_response,
-    get_recruitcrm_headers
+    get_recruitcrm_headers,
+    fetch_recruitcrm_assigned_candidates
 )
 
 # ==============================================================================
@@ -554,7 +555,132 @@ def generate_multiple_candidates():
     except Exception as e:
         app.logger.error(f"!!! EXCEPTION in generate_multiple_candidates: {e}")
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+@app.route('/api/bulk-process-job', methods=['POST'])
+def bulk_process_job():
+    """
+    Processes a job by fetching candidates at a specific stage, generating individual summaries,
+    and optionally creating a multi-candidate email.
+    """
+    app.logger.info("\n--- Endpoint Hit: /api/bulk-process-job ---")
+    data = request.get_json()
 
+    job_url = data.get('job_url')
+    single_prompt = data.get('single_candidate_prompt')
+    multi_prompt = data.get('multi_candidate_prompt')
+    generate_email = data.get('generate_email', False)
+    auto_push = data.get('auto_push', False)
+    status_id = data.get('status_id', '622817')
+
+    if not job_url or not single_prompt:
+        return jsonify({'error': 'Missing job_url or single_candidate_prompt'}), 400
+
+    try:
+        job_slug = job_url.split('/')[-1]
+        job_data = fetch_recruitcrm_job(job_slug)
+        if not job_data:
+            return jsonify({'error': f"Could not fetch job data for slug: {job_slug}"}), 404
+
+        candidates = fetch_recruitcrm_assigned_candidates(job_slug, status_id)
+        if not candidates:
+            return jsonify({
+                'success': True,
+                'message': f"No candidates found for job {job_slug} in status {status_id}.",
+                'candidates_found': 0,
+                'summaries_generated': 0,
+                'failures': 0,
+            }), 200
+
+        app.logger.info(f"Found {len(candidates)} candidates to process for job {job_slug}.")
+
+        processed_summaries = {}
+        failed_candidates = {}
+        candidate_urls_for_email = []
+
+        for cand_info in candidates:
+            # Correctly extract the slug from the nested 'candidate' object
+            candidate_details = cand_info.get('candidate', {})
+            slug = candidate_details.get('slug')
+            name = f"{candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}".strip()
+
+            if not slug:
+                app.logger.warning(f"Skipping candidate with no slug: {cand_info}")
+                continue
+
+            app.logger.info(f"Processing candidate: {name} ({slug})")
+            candidate_urls_for_email.append(f"https://app.recruitcrm.io/v1/candidates/{slug}")
+
+            try:
+                # The `candidate_details` from the assigned list is often enough,
+                # but fetching the full record ensures all custom fields are present.
+                full_candidate_data = fetch_recruitcrm_candidate(slug)
+                if not full_candidate_data:
+                    failed_candidates[name or slug] = "Failed to fetch full candidate data."
+                    continue
+
+                gemini_resume_file = None
+                resume_info = full_candidate_data.get('data', {}).get('resume')
+                if resume_info:
+                    gemini_resume_file = upload_resume_to_gemini(resume_info)
+
+                summary = generate_html_summary(full_candidate_data, job_data, None, "", single_prompt, None, gemini_resume_file, model)
+
+                if summary:
+                    processed_summaries[name or slug] = summary
+                    if auto_push:
+                        push_to_recruitcrm_internal(slug, summary)
+                else:
+                    failed_candidates[name or slug] = "AI failed to generate summary."
+
+            except Exception as e:
+                app.logger.error(f"Exception processing candidate {slug}: {e}")
+                failed_candidates[name or slug] = f"An unexpected error occurred: {e}"
+
+
+        email_html = None
+        if generate_email and multi_prompt and candidate_urls_for_email:
+            email_request_body = {
+                "candidate_urls": candidate_urls_for_email,
+                "prompt_type": multi_prompt,
+                "client_name": job_data.get('data', {}).get('company', {}).get('name', 'Valued Client'),
+                "job_url": job_url,
+            }
+            with app.test_request_context('/api/generate-multiple-candidates', method='POST', json=email_request_body):
+                email_response, status_code = generate_multiple_candidates()
+                if status_code == 200:
+                    email_html = email_response.get_json().get('generated_content')
+
+
+        return jsonify({
+            'success': True,
+            'job_title': job_data.get('data', {}).get('name'),
+            'candidates_found': len(candidates),
+            'summaries_generated': len(processed_summaries),
+            'summaries': processed_summaries,
+            'pushes_attempted': len(processed_summaries) if auto_push else 0,
+            'failures': len(failed_candidates),
+            'failed_candidates': failed_candidates,
+            'email_html': email_html
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"!!! TOP-LEVEL EXCEPTION in bulk_process_job: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def push_to_recruitcrm_internal(candidate_slug, html_summary):
+    """Internal function to push summary, returns success status."""
+    try:
+        url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
+        files = {'candidate_summary': (None, html_summary)}
+        response = requests.post(url, files=files, headers=get_recruitcrm_headers())
+        if response.status_code == 200:
+            logging.info(f"Successfully pushed summary for {candidate_slug}")
+            return True
+        else:
+            logging.error(f"Failed to push summary for {candidate_slug}: {response.text}")
+            return False
+    except Exception as e:
+        logging.error(f"Exception in push_to_recruitcrm_internal for {candidate_slug}: {e}")
+        return False
 @app.route('/api/log-feedback', methods=['POST'])
 def log_feedback():
     """Receives and logs user feedback on a generated summary to Firestore."""
