@@ -363,7 +363,7 @@ def generate_multiple_candidates():
 
         app.logger.info(f"Processing {len(candidate_slugs)} candidates for job {job_slug}")
 
-        job_data = fetch_recruitcrm_job(job_slug)
+        job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True)
         if not job_data:
             return jsonify({'error': "Failed to fetch job data"}), 404
 
@@ -492,7 +492,7 @@ def bulk_process_job():
 
     try:
         job_slug = job_url.split('/')[-1]
-        job_data = fetch_recruitcrm_job(job_slug)
+        job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True)
         if not job_data:
             return jsonify({'error': f"Could not fetch job data for slug: {job_slug}"}), 404
 
