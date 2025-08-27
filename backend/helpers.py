@@ -59,6 +59,22 @@ def fetch_recruitcrm_candidate(slug):
         logging.error(f"Error fetching RecruitCRM candidate {slug}: {e}")
         return None
 
+
+def fetch_candidate_interview_id(slug):
+    """Fetches a candidate's AI Interview ID from RecruitCRM."""
+    candidate_data = fetch_recruitcrm_candidate(slug)
+    if not candidate_data:
+        return None
+
+    candidate_details = candidate_data.get('data', candidate_data)
+    for field in candidate_details.get('custom_fields', []):
+        if isinstance(field, dict) and field.get('field_name') == 'AI Interview ID':
+            value = field.get('value')
+            if value:
+                return value.split('?')[0]
+            break
+    return None
+
 def fetch_recruitcrm_job(slug):
     """Fetches job data from RecruitCRM using the job's slug."""
     url = f'https://api.recruitcrm.io/v1/jobs/{slug}'
