@@ -2,9 +2,11 @@ import os
 import logging
 import requests
 import mimetypes
+import tempfile
 from urllib.parse import urlparse
 import google.generativeai as genai
 from config.prompts import build_full_prompt
+from file_converter import convert_to_supported_format, UnsupportedFileTypeError
 
 # --- Environment Variable Checks ---
 RECRUITCRM_API_KEY = os.getenv('RECRUITCRM_API_KEY')
@@ -157,28 +159,44 @@ def upload_resume_to_gemini(resume_info):
         file_response = requests.get(resume_url)
         file_response.raise_for_status()
 
-        content_type = file_response.headers.get('Content-Type')
-        filename = resume_info.get('filename', 'resume.bin')
+        original_filename = resume_info.get('filename', 'resume.bin')
+        
+        # Convert file to supported format if needed
+        try:
+            converted_bytes, final_mime_type = convert_to_supported_format(
+                file_response.content, 
+                original_filename
+            )
+            logging.info(f"File '{original_filename}' converted to MIME type '{final_mime_type}'")
+        except UnsupportedFileTypeError as e:
+            logging.error(f"Cannot upload file '{original_filename}': {e}")
+            return None
 
-        if not content_type:
-            content_type, _ = mimetypes.guess_type(filename)
-            if not content_type:
-                content_type = 'application/octet-stream'
-                logging.warning(f"Could not determine MIME type for {filename}, using {content_type}.")
+        logging.info(f"Uploading '{original_filename}' with MIME type '{final_mime_type}' to Gemini.")
 
-        logging.info(f"Uploading '{filename}' with MIME type '{content_type}' to Gemini.")
-
-        # --- THIS IS THE FIX ---
-        # Use the 'content' parameter for the file bytes, not 'path'
-        gemini_file = genai.upload_file(
-            content=file_response.content,
-            display_name=filename,
-            mime_type=content_type
-        )
-        # --- END FIX ---
-
-        logging.info(f"Completed uploading '{gemini_file.display_name}' to Gemini.")
-        return gemini_file
+        # Create temporary file with proper extension for final format
+        file_ext = '.txt' if final_mime_type == 'text/plain' else os.path.splitext(original_filename)[1]
+        
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_ext)
+        try:
+            tmp_file.write(converted_bytes)
+            tmp_file.close()  # Close file before Gemini tries to access it
+            
+            gemini_file = genai.upload_file(
+                path=tmp_file.name,
+                display_name=original_filename,
+                mime_type=final_mime_type
+            )
+            
+            logging.info(f"Completed uploading '{gemini_file.display_name}' to Gemini.")
+            return gemini_file
+            
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(tmp_file.name)
+            except OSError as cleanup_error:
+                logging.warning(f"Could not clean up temp file {tmp_file.name}: {cleanup_error}")
 
     except requests.exceptions.RequestException as e:
         logging.error(f"Error downloading resume from {resume_url}: {e}")

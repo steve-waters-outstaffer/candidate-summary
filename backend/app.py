@@ -544,17 +544,39 @@ def bulk_process_job():
 
         email_html = None
         if generate_email and multi_prompt and candidate_slugs_for_email:
-            email_request_body = {
-                "candidate_slugs": candidate_slugs_for_email,
-                "job_slug": job_slug,
-                "prompt_type": multi_prompt,
-                "client_name": job_details.get('company', {}).get('name', 'Valued Client'),
-            }
-            # Use a test client to make an internal request to our corrected endpoint
-            with app.test_request_context('/api/generate-multiple-candidates', method='POST', json=email_request_body):
-                response = generate_multiple_candidates()
-                if response.status_code == 200:
-                    email_html = response.get_json().get('generated_content')
+            try:
+                # Call the function directly since we're in the same app context
+                from flask import request as flask_request
+                
+                # Temporarily modify request data
+                original_json = getattr(flask_request, '_cached_json', None)
+                email_request_data = {
+                    "candidate_slugs": candidate_slugs_for_email,
+                    "job_slug": job_slug,
+                    "prompt_type": multi_prompt,
+                    "client_name": job_details.get('company', {}).get('name', 'Valued Client'),
+                }
+                
+                # Mock the request json data for the internal call
+                flask_request._cached_json = (email_request_data, email_request_data)
+                
+                try:
+                    response = generate_multiple_candidates()
+                    if isinstance(response, tuple):
+                        response_data, status_code = response
+                    else:
+                        response_data = response.get_json() if hasattr(response, 'get_json') else response
+                        status_code = response.status_code if hasattr(response, 'status_code') else 200
+                        
+                    if status_code == 200 and response_data.get('success'):
+                        email_html = response_data.get('generated_content')
+                finally:
+                    # Restore original request data
+                    flask_request._cached_json = original_json
+                    
+            except Exception as email_error:
+                app.logger.error(f"Failed to generate email content: {email_error}")
+                email_html = None
 
         return jsonify({
             'success': True,
