@@ -461,20 +461,20 @@ const MultipleCandidatesGenerator = () => {
                     </Box>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Resume:</Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        {getStatusIcon(status?.resume?.status)}
-                        <Typography variant="body2" sx={{ color: getStatusColor(status?.resume?.status) }}>
-                            {status?.resume?.message || 'Pending candidate'}
-                        </Typography>
-                    </Box>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Anna AI Interview:</Typography>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         {getStatusIcon(status?.interview?.status)}
                         <Typography variant="body2" sx={{ color: getStatusColor(status?.interview?.status) }}>
                             {status?.interview?.message || 'Pending candidate'}
+                        </Typography>
+                    </Box>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Candidate Resume:</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {getStatusIcon(status?.resume?.status)}
+                        <Typography variant="body2" sx={{ color: getStatusColor(status?.resume?.status) }}>
+                            {status?.resume?.message || 'Pending candidate'}
                         </Typography>
                     </Box>
                 </Box>
@@ -488,7 +488,7 @@ const MultipleCandidatesGenerator = () => {
         return (
             <Box key={index} sx={{ mb: 3 }}>
                 <TextField
-                    label={`Candidate ${index + 1} URL`}
+                    label={`RecruitCRM URL ${index + 1}`}
                     value={candidateUrls[index]}
                     onChange={(e) => handleCandidateUrlChange(index, e.target.value)}
                     fullWidth
@@ -500,9 +500,9 @@ const MultipleCandidatesGenerator = () => {
                     variant="outlined"
                     onClick={() => validateCandidate(index)}
                     disabled={!hasValue || candidateStatuses[index]?.candidate?.status === 'loading'}
-                    size="small"
+                    fullWidth
                 >
-                    {candidateStatuses[index]?.candidate?.status === 'loading' ? <CircularProgress size={16} /> : 'Confirm Details'}
+                    {candidateStatuses[index]?.candidate?.status === 'loading' ? <CircularProgress size={16} /> : 'Parse URL & Confirm Details'}
                 </Button>
                 {renderCandidateStatus(index)}
             </Box>
