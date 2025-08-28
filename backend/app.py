@@ -2,6 +2,7 @@ import os
 import logging
 import re
 import requests
+import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -508,13 +509,12 @@ def bulk_process_job():
 
         candidates = fetch_recruitcrm_assigned_candidates(job_slug, status_id)
         if not candidates:
-            return jsonify({'success': True, 'message': f"No candidates found."}), 200
+            return jsonify({'success': True, 'message': f"No candidates found at this stage."}), 200
 
         app.logger.info(f"Found {len(candidates)} candidates to process for job {job_slug}.")
 
         processed_summaries = {}
         failed_candidates = {}
-        candidate_slugs_for_email = []
 
         for cand_info in candidates:
             full_candidate_data = cand_info.get('candidate', {})
@@ -525,7 +525,6 @@ def bulk_process_job():
                 continue
 
             app.logger.info(f"Processing candidate: {name} ({slug})")
-            candidate_slugs_for_email.append(slug)
 
             try:
                 gemini_resume_file = None
@@ -534,14 +533,8 @@ def bulk_process_job():
                     gemini_resume_file = upload_resume_to_gemini(resume_info)
 
                 interview_data = None
-                interview_id = None
                 if alpharun_job_id:
-                    for field in full_candidate_data.get('custom_fields', []):
-                        if field.get('field_name') == 'AI Interview ID' and field.get('value'):
-                            interview_id = field.get('value').split('?')[0]
-                            break
-                    if not interview_id:
-                        interview_id = fetch_candidate_interview_id(slug)
+                    interview_id = fetch_candidate_interview_id(slug)
                     if interview_id:
                         interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                     else:
@@ -562,32 +555,23 @@ def bulk_process_job():
                 failed_candidates[name or slug] = f"An unexpected error occurred: {e}"
 
         email_html = None
-        if generate_email and multi_prompt and candidate_slugs_for_email:
+        if generate_email and multi_prompt and processed_summaries:
             try:
-                # Build formatted candidate data from the already processed summaries
-                formatted_candidates_data = ""
-                for i, slug in enumerate(candidate_slugs_for_email):
-                    candidate_name = next((name for name in processed_summaries.keys() if slug in name), f"Candidate {i+1}")
-                    formatted_candidates_data += f"\n**CANDIDATE {i+1}: {candidate_name}**\n"
-                    formatted_candidates_data += f"Summary: Generated and available\n"
-                    formatted_candidates_data += f"Resume: Available for AI analysis\n\n"
+                summaries_as_string = json.dumps(processed_summaries, indent=2)
 
-                # Use your proper prompt system
                 prompt_kwargs = {
                     'client_name': job_details.get('company', {}).get('name', 'Valued Client'),
                     'job_url': f"https://app.recruitcrm.io/jobs/{job_slug}",
                     'job_title': job_details.get('name', ''),
                     'job_data': job_details,
-                    'candidates_data': formatted_candidates_data,
-                    'preferred_candidate': '',
-                    'additional_context': f"Individual summaries have been generated for all {len(processed_summaries)} candidates."
+                    'processed_summaries': summaries_as_string,
+                    'preferred_candidate': '', # This can be populated from the UI if needed
+                    'additional_context': f"The following AI-generated summaries are for the candidates submitted for this role."
                 }
 
-                # Use build_full_prompt properly like the rest of your code
                 full_prompt = build_full_prompt(multi_prompt, "multiple", **prompt_kwargs)
-
-                # Generate using your standard pattern
                 response = model.generate_content([full_prompt])
+
                 if response and response.text:
                     cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
                     email_html = cleaned_content.replace('[HERE_LINK]', f'<a href="https://app.recruitcrm.io/jobs/{job_slug}">here</a>')
@@ -599,10 +583,7 @@ def bulk_process_job():
                 app.logger.error(f"Failed to generate email content: {email_error}")
                 email_html = None
 
-    except Exception as email_error:
-        app.logger.error(f"Failed to generate email content: {email_error}")
-        email_html = None
-
+        # This return statement is now correctly placed at the end of the main try block
         return jsonify({
             'success': True,
             'job_title': job_details.get('name'),
@@ -618,6 +599,7 @@ def bulk_process_job():
     except Exception as e:
         app.logger.error(f"!!! TOP-LEVEL EXCEPTION in bulk_process_job: {e}")
         return jsonify({'error': str(e)}), 500
+
 
 def push_to_recruitcrm_internal(candidate_slug, html_summary):
     """Internal function to push summary, returns success status."""
