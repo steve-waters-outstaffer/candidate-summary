@@ -126,7 +126,8 @@ def fetch_recruitcrm_assigned_candidates(job_slug, status_id=None):
 
 def fetch_alpharun_interview(job_opening_id, interview_id):
     """Fetches interview data from AlphaRun."""
-    url = f"https://alpharun.com/api/v1/job_openings/{job_opening_id}/interviews/{interview_id}"
+    url = f"https://api.alpharun.com/api/v1/job-openings/{job_opening_id}/interviews/{interview_id}"
+
     try:
         response = requests.get(url, headers=get_alpharun_headers())
         response.raise_for_status()
