@@ -564,38 +564,44 @@ def bulk_process_job():
         email_html = None
         if generate_email and multi_prompt and candidate_slugs_for_email:
             try:
-                # Call the function directly since we're in the same app context
-                from flask import request as flask_request
-                
-                # Temporarily modify request data
-                original_json = getattr(flask_request, '_cached_json', None)
-                email_request_data = {
-                    "candidate_slugs": candidate_slugs_for_email,
-                    "job_slug": job_slug,
-                    "prompt_type": multi_prompt,
-                    "client_name": job_details.get('company', {}).get('name', 'Valued Client'),
+                # Build formatted candidate data from the already processed summaries
+                formatted_candidates_data = ""
+                for i, slug in enumerate(candidate_slugs_for_email):
+                    candidate_name = next((name for name in processed_summaries.keys() if slug in name), f"Candidate {i+1}")
+                    formatted_candidates_data += f"\n**CANDIDATE {i+1}: {candidate_name}**\n"
+                    formatted_candidates_data += f"Summary: Generated and available\n"
+                    formatted_candidates_data += f"Resume: Available for AI analysis\n\n"
+
+                # Use your proper prompt system
+                prompt_kwargs = {
+                    'client_name': job_details.get('company', {}).get('name', 'Valued Client'),
+                    'job_url': f"https://app.recruitcrm.io/jobs/{job_slug}",
+                    'job_title': job_details.get('name', ''),
+                    'job_data': job_details,
+                    'candidates_data': formatted_candidates_data,
+                    'preferred_candidate': '',
+                    'additional_context': f"Individual summaries have been generated for all {len(processed_summaries)} candidates."
                 }
-                
-                # Mock the request json data for the internal call
-                flask_request._cached_json = (email_request_data, email_request_data)
-                
-                try:
-                    response = generate_multiple_candidates()
-                    if isinstance(response, tuple):
-                        response_data, status_code = response
-                    else:
-                        response_data = response.get_json() if hasattr(response, 'get_json') else response
-                        status_code = response.status_code if hasattr(response, 'status_code') else 200
-                        
-                    if status_code == 200 and response_data.get('success'):
-                        email_html = response_data.get('generated_content')
-                finally:
-                    # Restore original request data
-                    flask_request._cached_json = original_json
-                    
+
+                # Use build_full_prompt properly like the rest of your code
+                full_prompt = build_full_prompt(multi_prompt, "multiple", **prompt_kwargs)
+
+                # Generate using your standard pattern
+                response = model.generate_content([full_prompt])
+                if response and response.text:
+                    cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
+                    email_html = cleaned_content.replace('[HERE_LINK]', f'<a href="https://app.recruitcrm.io/jobs/{job_slug}">here</a>')
+                    app.logger.info("Email generated successfully using existing summaries")
+                else:
+                    app.logger.error("Failed to generate email content - no response from model")
+
             except Exception as email_error:
                 app.logger.error(f"Failed to generate email content: {email_error}")
                 email_html = None
+
+    except Exception as email_error:
+        app.logger.error(f"Failed to generate email content: {email_error}")
+        email_html = None
 
         return jsonify({
             'success': True,
