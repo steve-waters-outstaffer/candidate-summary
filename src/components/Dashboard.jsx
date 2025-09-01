@@ -61,18 +61,18 @@ const Dashboard = () => {
                     <Tabs
                         value={currentTab}
                         onChange={handleTabChange}
-                        centered
+                        left
                     >
                         <Tab label="Single Candidate Summary" />
-                        <Tab label="Multi-Candidate Email" />
+                        {/* <Tab label="Multi-Candidate Email" /> */}
                         <Tab label="Bulk Job Processor" />
                     </Tabs>
                 </Box>
 
                 <Box sx={{ pt: 3 }}>
                     {currentTab === 0 && <CandidateSummaryGenerator />}
-                    {currentTab === 1 && <MultipleCandidatesGenerator />}
-                    {currentTab === 2 && <BulkGenerator />}
+                    {/*  {currentTab === 1 && <MultipleCandidatesGenerator />} */}
+                    {currentTab === 1 && <BulkGenerator />}
                 </Box>
             </Container>
         </Box>

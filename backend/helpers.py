@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+from re import sub, MULTILINE
 import mimetypes
 import tempfile
 from urllib.parse import urlparse
@@ -23,7 +24,7 @@ def get_recruitcrm_headers():
         raise ValueError("RECRUITCRM_API_KEY is not set in the environment.")
     return {
         'Authorization': f'Bearer {RECRUITCRM_API_KEY}',
-        'Content-Type': 'application/json'
+        'Accept': 'application/json'  # Use 'Accept' instead of 'Content-Type'
     }
 
 def get_alpharun_headers():
@@ -267,4 +268,12 @@ def generate_html_summary(candidate_data, job_data, interview_data, additional_c
         prompt_parts.append(gemini_resume_file)
         logging.info("Resume file included in the prompt for AI generation.")
 
-    return generate_ai_response(model, prompt_parts)
+    html_summary = generate_ai_response(model, prompt_parts)
+
+    if html_summary:
+        # --- FIX: Strip markdown code fences from the AI's response ---
+        # The model sometimes wraps its HTML output in ```html ... ```, which needs to be removed.
+        cleaned_summary = sub(r'^```(html)?\n|```$', '', html_summary, flags=MULTILINE).strip()
+        return cleaned_summary
+
+    return html_summary

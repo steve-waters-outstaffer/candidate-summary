@@ -43,18 +43,21 @@ docker build -t $IMAGE_NAME .
 echo "📤 Pushing image to Container Registry..."
 docker push $IMAGE_NAME
 
-# Deploy to Cloud Run
+# Deploy to Cloud Run with extended timeout and resources
 echo "☁️ Deploying to Cloud Run..."
 gcloud run deploy $SERVICE_NAME \
   --image $IMAGE_NAME \
   --platform managed \
   --region $REGION \
   --allow-unauthenticated \
-  --memory 512Mi \
-  --cpu 1 \
+  --memory 4Gi \
+  --cpu 4 \
+  --timeout 3600 \
+  --concurrency 1 \
   --min-instances 0 \
-  --max-instances 10 \
+  --max-instances 5 \
   --port 5000 \
+  --execution-environment gen2 \
   --set-env-vars FLASK_ENV=production \
   --set-env-vars GOOGLE_API_KEY=$GOOGLE_API_KEY \
   --set-env-vars RECRUITCRM_API_KEY=$RECRUITCRM_API_KEY \

@@ -318,21 +318,29 @@ def generate_summary():
 @app.route('/api/push-to-recruitcrm', methods=['POST'])
 def push_to_recruitcrm():
     """Push generated summary to RecruitCRM candidate record"""
-    app.logger.info("\n--- Endpoint Hit: /api/push-to-recruitcrm ---")
+    app.logger.info("\n--- NEW VERSION: Endpoint Hit: /api/push-to-recruitcrm ---")
     try:
         data = request.get_json()
+
+
         candidate_slug = data.get('candidate_slug')
         html_summary = data.get('html_summary')
+        app.logger.info(f"Candidate slug: {candidate_slug}, HTML length: {len(html_summary) if html_summary else 0}")
 
         if not candidate_slug or not html_summary:
+            app.logger.error("Missing candidate slug or HTML summary")
             return jsonify({'error': 'Missing candidate slug or HTML summary'}), 400
 
         url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
         files = {'candidate_summary': (None, html_summary)}
+        app.logger.info(f"Making request to: {url}")
 
         response = requests.post(url, files=files, headers=get_recruitcrm_headers())
+        app.logger.info(f"RecruitCRM response status: {response.status_code}")
+
 
         if response.status_code == 200:
+            app.logger.info("SUCCESS: Summary pushed to RecruitCRM")
             return jsonify({'success': True, 'message': 'Summary pushed to RecruitCRM successfully'})
         else:
             app.logger.error(f"!!! ERROR: Failed to update RecruitCRM: {response.text}")
@@ -471,6 +479,115 @@ def generate_multiple_candidates():
         app.logger.error(f"!!! EXCEPTION in generate_multiple_candidates: {e}")
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
+@app.route('/api/process-curated-candidates', methods=['POST'])
+def process_curated_candidates():
+    """
+    Processes a curated list of candidates for a specific job.
+    Generates individual summaries and/or a multi-candidate email.
+    """
+    app.logger.info("\n--- Endpoint Hit: /api/process-curated-candidates ---")
+    data = request.get_json()
+
+    job_slug = data.get('job_slug')
+    candidate_slugs = data.get('candidate_slugs', [])
+    single_prompt = data.get('single_prompt_type')
+    multi_prompt = data.get('multi_prompt_type')
+    auto_push = data.get('auto_push', False)
+    generate_summaries = data.get('generate_summaries', False)
+    generate_email = data.get('generate_email', True) # Default to true for this workflow
+
+    if not (generate_summaries or generate_email):
+        return jsonify({'error': 'No action requested. Please enable summary or email generation.'}), 400
+    if not job_slug or not candidate_slugs:
+        return jsonify({'error': 'job_slug and candidate_slugs are required.'}), 400
+
+    processed_summaries_list = []
+    failed_candidates = {}
+    email_html = None
+
+    try:
+        job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True)
+        if not job_data:
+            return jsonify({'error': f"Could not fetch job data for slug: {job_slug}"}), 404
+        job_details = job_data.get('data', job_data)
+
+        # Get AlphaRun ID from job for interviews
+        alpharun_job_id = None
+        for field in job_details.get('custom_fields', []):
+            if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
+                alpharun_job_id = field.get('value')
+                break
+
+        # Generate summaries if requested OR if needed for the email
+        if generate_summaries or generate_email:
+            for slug in candidate_slugs:
+                app.logger.info(f"Processing curated candidate: {slug}")
+                try:
+                    full_candidate_data = fetch_recruitcrm_candidate(slug)
+                    if not full_candidate_data:
+                        failed_candidates[slug] = "Could not fetch candidate data."
+                        continue
+
+                    candidate_details = full_candidate_data.get('data', full_candidate_data)
+                    name = f"{candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}".strip()
+
+                    gemini_resume_file = None
+                    if candidate_details.get('resume'):
+                        gemini_resume_file = upload_resume_to_gemini(candidate_details.get('resume'))
+
+                    interview_data = None
+                    if alpharun_job_id:
+                        interview_id = fetch_candidate_interview_id(slug)
+                        if interview_id:
+                            interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+
+                    summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, model)
+
+                    if summary:
+                        processed_summaries_list.append({'name': name, 'slug': slug, 'html': summary})
+                        if auto_push and generate_summaries:
+                            push_to_recruitcrm_internal(slug, summary)
+                    else:
+                        failed_candidates[name or slug] = "AI failed to generate summary."
+                except Exception as e:
+                    failed_candidates[slug] = f"An unexpected error occurred: {e}"
+
+        # Generate multi-candidate email using the summaries we just made
+        if generate_email and processed_summaries_list:
+            try:
+                summaries_as_string = json.dumps({item['name']: item['html'] for item in processed_summaries_list}, indent=2)
+                prompt_kwargs = {
+                    'client_name': data.get('client_name'),
+                    'job_url': data.get('job_url'),
+                    'job_title': job_details.get('name', ''),
+                    'job_data': job_details,
+                    'processed_summaries': summaries_as_string,
+                    'candidate_names': "\n".join([item['name'] for item in processed_summaries_list]),
+                    'preferred_candidate': data.get('preferred_candidate'),
+                    'additional_context': data.get('additional_context')
+                }
+                full_prompt = build_full_prompt(multi_prompt, "multiple", **prompt_kwargs)
+                response = model.generate_content([full_prompt])
+                if response and response.text:
+                    cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
+                    link = data.get('job_url')
+                    email_html = cleaned_content.replace('[HERE_LINK]', f'<a href="{link}">here</a>') if link else cleaned_content
+            except Exception as e:
+                app.logger.error(f"Failed to generate email content for curated list: {e}")
+
+        # Build and return the response
+        final_response = {'success': True}
+        if generate_summaries:
+            final_response['summaries'] = processed_summaries_list
+            final_response['failures'] = failed_candidates
+        if generate_email:
+            final_response['email_html'] = email_html
+
+        return jsonify(final_response), 200
+
+    except Exception as e:
+        app.logger.error(f"!!! TOP-LEVEL EXCEPTION in process_curated_candidates: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bulk-process-job', methods=['POST'])
 def bulk_process_job():
@@ -488,8 +605,20 @@ def bulk_process_job():
     auto_push = data.get('auto_push', False)
     status_id = data.get('status_id')
 
+    # --- NEW: Get additional details from the request ---
+    client_name = data.get('client_name')
+    preferred_candidate = data.get('preferred_candidate', '')
+    additional_context = data.get('additional_context', '')
+    outstaffer_platform_url = data.get('outstaffer_platform_url')
+
+
     if not job_url or not single_prompt:
         return jsonify({'error': 'Missing job_url or single_candidate_prompt'}), 400
+
+    processed_summaries_list = []
+    failed_candidates = {}
+    job_details = {}
+    candidates = []
 
     try:
         job_slug = job_url.split('/')[-1]
@@ -512,9 +641,6 @@ def bulk_process_job():
             return jsonify({'success': True, 'message': f"No candidates found at this stage."}), 200
 
         app.logger.info(f"Found {len(candidates)} candidates to process for job {job_slug}.")
-
-        processed_summaries = {}
-        failed_candidates = {}
 
         for cand_info in candidates:
             full_candidate_data = cand_info.get('candidate', {})
@@ -541,10 +667,15 @@ def bulk_process_job():
                         app.logger.warning(f"Missing AI Interview ID for candidate {slug}; skipping AlphaRun call.")
 
                 summary_input_data = {'data': full_candidate_data}
-                summary = generate_html_summary(summary_input_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, model)
+                # --- MODIFIED: Pass additional_context to individual summary generation ---
+                summary = generate_html_summary(summary_input_data, job_data, interview_data, additional_context, single_prompt, None, gemini_resume_file, model)
 
                 if summary:
-                    processed_summaries[name or slug] = summary
+                    processed_summaries_list.append({
+                        'name': name or slug,
+                        'slug': slug,
+                        'html': summary
+                    })
                     if auto_push:
                         push_to_recruitcrm_internal(slug, summary)
                 else:
@@ -555,18 +686,23 @@ def bulk_process_job():
                 failed_candidates[name or slug] = f"An unexpected error occurred: {e}"
 
         email_html = None
-        if generate_email and multi_prompt and processed_summaries:
+        if generate_email and multi_prompt and processed_summaries_list:
             try:
-                summaries_as_string = json.dumps(processed_summaries, indent=2)
+                processed_summaries_dict = {item['name']: item['html'] for item in processed_summaries_list}
+                summaries_as_string = json.dumps(processed_summaries_dict, indent=2)
+                candidate_names_list = list(processed_summaries_dict.keys())
+                candidate_names_str = "\n".join(candidate_names_list)
 
+                # --- MODIFIED: Use new data for prompt_kwargs ---
                 prompt_kwargs = {
-                    'client_name': job_details.get('company', {}).get('name', 'Valued Client'),
-                    'job_url': f"https://app.recruitcrm.io/jobs/{job_slug}",
+                    'client_name': client_name or job_details.get('company', {}).get('name', 'Valued Client'),
+                    'job_url': outstaffer_platform_url,
                     'job_title': job_details.get('name', ''),
                     'job_data': job_details,
                     'processed_summaries': summaries_as_string,
-                    'preferred_candidate': '', # This can be populated from the UI if needed
-                    'additional_context': f"The following AI-generated summaries are for the candidates submitted for this role."
+                    'candidate_names': candidate_names_str,
+                    'preferred_candidate': preferred_candidate,
+                    'additional_context': additional_context
                 }
 
                 full_prompt = build_full_prompt(multi_prompt, "multiple", **prompt_kwargs)
@@ -574,7 +710,9 @@ def bulk_process_job():
 
                 if response and response.text:
                     cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
-                    email_html = cleaned_content.replace('[HERE_LINK]', f'<a href="https://app.recruitcrm.io/jobs/{job_slug}">here</a>')
+                    # --- MODIFIED: Use platform URL if provided, otherwise fallback to RecruitCRM URL ---
+                    link_url = outstaffer_platform_url or f"https://app.recruitcrm.io/jobs/{job_slug}"
+                    email_html = cleaned_content.replace('[HERE_LINK]', f'<a href="{link_url}">here</a>')
                     app.logger.info("Email generated successfully using existing summaries")
                 else:
                     app.logger.error("Failed to generate email content - no response from model")
@@ -583,14 +721,13 @@ def bulk_process_job():
                 app.logger.error(f"Failed to generate email content: {email_error}")
                 email_html = None
 
-        # This return statement is now correctly placed at the end of the main try block
         return jsonify({
             'success': True,
-            'job_title': job_details.get('name'),
+            'job_title': job_details.get('name', 'N/A'),
             'candidates_found': len(candidates),
-            'summaries_generated': len(processed_summaries),
-            'summaries': processed_summaries,
-            'pushes_attempted': len(processed_summaries) if auto_push else 0,
+            'summaries_generated': len(processed_summaries_list),
+            'summaries': processed_summaries_list,
+            'pushes_attempted': len(processed_summaries_list) if auto_push else 0,
             'failures': len(failed_candidates),
             'failed_candidates': failed_candidates,
             'email_html': email_html
@@ -603,12 +740,13 @@ def bulk_process_job():
 
 def push_to_recruitcrm_internal(candidate_slug, html_summary):
     """Internal function to push summary, returns success status."""
+    app.logger.info("\n--- Endpoint Hit: /api/push-to-recruitcrm_internal ---")
     try:
         url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
         files = {'candidate_summary': (None, html_summary)}
         response = requests.post(url, files=files, headers=get_recruitcrm_headers())
         if response.status_code == 200:
-            logging.info(f"Successfully pushed summary for {candidate_slug}")
+            logging.info(f"Successfully pushed summary for using internal {candidate_slug}")
             return True
         else:
             logging.error(f"Failed to push summary for {candidate_slug}: {response.text}")

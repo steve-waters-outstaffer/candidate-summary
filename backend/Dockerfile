@@ -16,5 +16,5 @@ EXPOSE 5000
 ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
 
-# Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "app:app"]
+# Run with gunicorn with optimized settings for long-running processes
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "sync", "--timeout", "3600", "--keep-alive", "2", "--max-requests", "100", "--max-requests-jitter", "10", "app:app"]
