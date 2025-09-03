@@ -15,7 +15,8 @@ from helpers import (
     upload_resume_to_gemini,
     generate_html_summary,
     get_recruitcrm_headers,
-    fetch_recruitcrm_candidate_job_specific_fields
+    fetch_recruitcrm_candidate_job_specific_fields,
+    fetch_candidate_interview_id
 )
 import requests
 
@@ -90,13 +91,20 @@ def test_interview():
     """Tests the connection to the AlphaRun interview API."""
     current_app.logger.info("\n--- Endpoint Hit: /api/test-interview ---")
     data = request.get_json()
-    raw_interview_id = data.get('interview_id')
-    job_opening_id = data.get('alpharun_job_id')
-    if not raw_interview_id or not job_opening_id:
-        return jsonify({'error': 'Missing interview_id or alpharun_job_id'}), 400
+    candidate_slug = data.get('candidate_slug')
+    job_slug = data.get('job_slug')
+    alpharun_job_id = data.get('alpharun_job_id')
+
+    if not candidate_slug or not alpharun_job_id:
+        return jsonify({'error': 'Missing candidate_slug or alpharun_job_id'}), 400
+
+    raw_interview_id = fetch_candidate_interview_id(candidate_slug, job_slug)
+
+    if not raw_interview_id:
+        return jsonify({'error': 'AI Interview ID not found for this candidate.'}), 404
 
     interview_id = raw_interview_id.split('?')[0]
-    interview_data = fetch_alpharun_interview(job_opening_id, interview_id)
+    interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
     if interview_data:
         contact = interview_data.get('data', {}).get('interview', {}).get('contact', {})
         return jsonify({

@@ -2,6 +2,7 @@ import os
 import logging
 import requests
 import re
+from flask import current_app
 from urllib.parse import urlparse
 from re import sub, MULTILINE
 import mimetypes
