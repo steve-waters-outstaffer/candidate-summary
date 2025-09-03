@@ -1,6 +1,9 @@
 import io
 import mimetypes
 import docx # From python-docx library
+import structlog
+
+log = structlog.get_logger()
 
 # A set of MIME types that the Gemini API is known to support for file uploads.
 # This list can be expanded based on the official Gemini documentation.
@@ -40,14 +43,23 @@ def convert_to_supported_format(file_bytes: bytes, original_filename: str) -> tu
 
     # If the file is already in a supported format, return it as is.
     if original_mime_type in SUPPORTED_MIME_TYPES:
-        print(f"LOG: File '{original_filename}' with MIME type '{original_mime_type}' is already supported.")
+        log.info(
+            "file_converter.format.supported",
+            filename=original_filename,
+            mime_type=original_mime_type,
+        )
         return file_bytes, original_mime_type
 
     # --- Conversion Logic ---
 
     # Handle .docx files -> convert to plain text
     if original_mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-        print(f"LOG: Converting DOCX file '{original_filename}' to plain text.")
+        log.info(
+            "file_converter.conversion.started",
+            filename=original_filename,
+            from_format="docx",
+            to_format="text/plain",
+        )
         try:
             document = docx.Document(io.BytesIO(file_bytes))
             full_text = "\n".join([para.text for para in document.paragraphs])

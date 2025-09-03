@@ -1,8 +1,7 @@
 import os
-import logging
+import structlog
 import requests
 import re
-from flask import current_app
 from urllib.parse import urlparse
 from re import sub, MULTILINE
 import mimetypes
@@ -11,6 +10,8 @@ from urllib.parse import urlparse
 import google.generativeai as genai
 from config.prompts import build_full_prompt
 from file_converter import convert_to_supported_format, UnsupportedFileTypeError
+
+log = structlog.get_logger()
 
 # --- Environment Variable Checks ---
 RECRUITCRM_API_KEY = os.getenv('RECRUITCRM_API_KEY')
@@ -83,7 +84,11 @@ def fetch_recruitcrm_candidate(slug):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching RecruitCRM candidate {slug}: {e}")
+        log.error(
+            "helpers.fetch_recruitcrm_candidate.failed",
+            slug=slug,
+            error=str(e),
+        )
         return None
 
 
@@ -97,47 +102,71 @@ def fetch_candidate_interview_id(candidate_slug, job_slug=None):
     """
     # 1. New Method: Check job-associated fields first
     if job_slug:
-        current_app.logger.info(f"--- Starting AI Interview ID search for cand: {candidate_slug}, job: {job_slug} ---")
+        log.info(
+            "helpers.fetch_candidate_interview_id.start",
+            candidate_slug=candidate_slug,
+            job_slug=job_slug,
+        )
         job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug)
 
         if job_specific_fields:
-            current_app.logger.info(f"  [1] Checking NEW location (Job-Associated Fields)...")
-            current_app.logger.info(f"  [1a] Fields returned from API: {job_specific_fields}")
+            log.info("helpers.fetch_candidate_interview_id.check_job_fields")
+            log.info(
+                "helpers.fetch_candidate_interview_id.job_fields_returned",
+                field_count=len(job_specific_fields),
+            )
             for field_key, field_data in job_specific_fields.items():
                 # Check if the field is a dictionary and has a 'label'
                 if isinstance(field_data, dict) and 'label' in field_data:
-                    current_app.logger.info(f"    - Checking field -> Label: '{field_data.get('label')}', Value: '{field_data.get('value')}'")
+                    log.info(
+                        "helpers.fetch_candidate_interview_id.check_field",
+                        label=field_data.get('label'),
+                        value=field_data.get('value'),
+                    )
                     if field_data.get('label') == 'AI Interview ID':
                         interview_id = field_data.get('value')
                         if interview_id:
-                            current_app.logger.info(f"  [SUCCESS] Found AI Interview ID '{interview_id}' in new location.")
+                            log.info(
+                                "helpers.fetch_candidate_interview_id.found_in_job_fields",
+                                interview_id=interview_id,
+                            )
                             return interview_id
-            current_app.logger.info("  [1b] Did not find a matching 'AI Interview ID' label with a value.")
+            log.info("helpers.fetch_candidate_interview_id.no_match_in_job_fields")
         else:
-            current_app.logger.info("  [1] No job-associated fields were returned from the API for this candidate/job.")
+            log.info("helpers.fetch_candidate_interview_id.no_job_fields")
 
     # 2. Fallback Method: Check the main custom fields on the candidate record
-    current_app.logger.info("  [2] Checking FALLBACK location (Candidate Custom Fields)...")
+    log.info("helpers.fetch_candidate_interview_id.check_candidate_fields")
     candidate_data = fetch_recruitcrm_candidate(candidate_slug)
     if candidate_data:
         candidate_details = candidate_data.get('data', candidate_data)
         custom_fields = candidate_details.get('custom_fields', [])
-        current_app.logger.info(f"  [2a] Fields returned from API: {custom_fields}")
+        log.info(
+            "helpers.fetch_candidate_interview_id.candidate_fields_returned",
+            field_count=len(custom_fields),
+        )
         for field in custom_fields:
             if isinstance(field, dict) and 'field_name' in field:
-                current_app.logger.info(f"    - Checking field -> Name: '{field.get('field_name')}', Value: '{field.get('value')}'")
+                log.info(
+                    "helpers.fetch_candidate_interview_id.check_candidate_field",
+                    name=field.get('field_name'),
+                    value=field.get('value'),
+                )
                 if field.get('field_name') == 'AI Interview ID':
                     interview_id = field.get('value')
                     if interview_id:
-                        current_app.logger.info(f"  [SUCCESS] Found AI Interview ID '{interview_id}' in fallback location.")
+                        log.info(
+                            "helpers.fetch_candidate_interview_id.found_in_candidate_fields",
+                            interview_id=interview_id,
+                        )
                         return interview_id
-        current_app.logger.info("  [2b] Did not find a matching 'AI Interview ID' field name with a value.")
+        log.info("helpers.fetch_candidate_interview_id.no_match_in_candidate_fields")
     else:
-        current_app.logger.warning("  [2] Could not fetch candidate data for fallback check.")
+        log.warning("helpers.fetch_candidate_interview_id.candidate_data_unavailable")
 
 
     # 3. If not found in either location
-    current_app.logger.info(f"--- No AI Interview ID found for candidate {candidate_slug}. Returning None. ---")
+    log.info("helpers.fetch_candidate_interview_id.not_found", candidate_slug=candidate_slug)
     return None
 
 def fetch_recruitcrm_job(slug, include_custom_fields=True):
@@ -163,7 +192,11 @@ def fetch_recruitcrm_job(slug, include_custom_fields=True):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching RecruitCRM job {slug}: {e}")
+        log.error(
+            "helpers.fetch_recruitcrm_job.failed",
+            slug=slug,
+            error=str(e),
+        )
         return None
 
 def fetch_hiring_pipeline():
@@ -174,7 +207,7 @@ def fetch_hiring_pipeline():
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching hiring pipeline: {e}")
+        log.error("helpers.fetch_hiring_pipeline.failed", error=str(e))
         return []
 
 def get_recruitcrm_headers():
@@ -186,37 +219,54 @@ def get_recruitcrm_headers():
 
 def push_to_recruitcrm_internal(candidate_slug, html_summary):
     """Internal function to push summary, returns success status."""
-    logging.info(f"\n--- Calling push_to_recruitcrm_internal for {candidate_slug} ---")
+    log.info("helpers.push_to_recruitcrm_internal.start", candidate_slug=candidate_slug)
     try:
         url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
         files = {'candidate_summary': (None, html_summary)}
         response = requests.post(url, files=files, headers=get_recruitcrm_headers())
         if response.status_code == 200:
-            logging.info(f"Successfully pushed summary for {candidate_slug}")
+            log.info("helpers.push_to_recruitcrm_internal.success", candidate_slug=candidate_slug)
             return True
         else:
-            logging.error(f"Failed to push summary for {candidate_slug}: {response.text}")
+            log.error(
+                "helpers.push_to_recruitcrm_internal.failed",
+                candidate_slug=candidate_slug,
+                status=response.status_code,
+            )
             return False
     except Exception as e:
-        logging.error(f"Exception in push_to_recruitcrm_internal for {candidate_slug}: {e}")
+        log.error(
+            "helpers.push_to_recruitcrm_internal.exception",
+            candidate_slug=candidate_slug,
+            error=str(e),
+        )
         return False
 
 def fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug):
     """Fetches job-specific custom fields for a candidate from RecruitCRM."""
     if not RECRUITCRM_API_KEY:
-        logging.error("RecruitCRM API key is not set.")
+        log.error("helpers.fetch_job_specific_fields.missing_api_key")
         return None
     url = f"https://api.recruitcrm.io/v1/candidates/associated-field/{candidate_slug}/{job_slug}"
     try:
         response = requests.get(url, headers=get_recruitcrm_headers())
         if response.status_code == 200:
-            logging.info(f"Successfully fetched job-specific fields for candidate {candidate_slug} and job {job_slug}")
+            log.info(
+                "helpers.fetch_job_specific_fields.success",
+                candidate_slug=candidate_slug,
+                job_slug=job_slug,
+            )
             return response.json().get('data', {})
         else:
-            logging.error(f"Failed to fetch job-specific fields for candidate {candidate_slug} and job {job_slug}: {response.text}")
+            log.error(
+                "helpers.fetch_job_specific_fields.failed",
+                candidate_slug=candidate_slug,
+                job_slug=job_slug,
+                status=response.status_code,
+            )
             return None
     except requests.exceptions.RequestException as e:
-        logging.error(f"An error occurred while fetching job-specific fields: {e}")
+        log.error("helpers.fetch_job_specific_fields.exception", error=str(e))
         return None
 
 def fetch_recruitcrm_assigned_candidates(job_slug, status_id=None):
@@ -228,7 +278,11 @@ def fetch_recruitcrm_assigned_candidates(job_slug, status_id=None):
         response.raise_for_status()
         return response.json().get('data', [])
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching assigned candidatez for job {job_slug}: {e}")
+        log.error(
+            "helpers.fetch_assigned_candidates.failed",
+            job_slug=job_slug,
+            error=str(e),
+        )
         return []
 
 def fetch_alpharun_interview(job_opening_id, interview_id):
@@ -240,7 +294,11 @@ def fetch_alpharun_interview(job_opening_id, interview_id):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching AlphaRun interview {interview_id}: {e}")
+        log.error(
+            "helpers.fetch_alpharun_interview.failed",
+            interview_id=interview_id,
+            error=str(e),
+        )
         return None
 
 # This pattern is crucial for validating the ID.
@@ -282,7 +340,7 @@ def fetch_fireflies_transcript(transcript_id: str) -> dict | None:
     """
     api_key = os.getenv('FIREFLIES_API_KEY')
     if not api_key:
-        logging.error("FIREFLIES_API_KEY environment variable not set.")
+        log.error("helpers.fireflies_api_key_missing")
         return None
 
     headers = {
@@ -305,16 +363,26 @@ def fetch_fireflies_transcript(transcript_id: str) -> dict | None:
         response_data = resp.json()
 
         if "errors" in response_data:
-            logging.error(f"GraphQL error fetching Fireflies transcript {transcript_id}: {response_data['errors']}")
+            log.error(
+                "helpers.fetch_fireflies_transcript.graphql_error",
+                transcript_id=transcript_id,
+            )
             return None
 
         return response_data.get("data", {}).get("transcript")
 
     except requests.exceptions.RequestException as e:
-        logging.error(f"Request error fetching Fireflies transcript {transcript_id}: {e}")
+        log.error(
+            "helpers.fetch_fireflies_transcript.request_error",
+            transcript_id=transcript_id,
+            error=str(e),
+        )
         return None
     except json.JSONDecodeError:
-        logging.error(f"JSON decode error fetching Fireflies transcript {transcript_id}.")
+        log.error(
+            "helpers.fetch_fireflies_transcript.json_decode_error",
+            transcript_id=transcript_id,
+        )
         return None
 
 # ==============================================================================
@@ -338,13 +406,13 @@ def normalise_fireflies_transcript(raw_transcript):
 def upload_resume_to_gemini(resume_info):
     """Downloads a resume, determines its MIME type, and uploads it to the Gemini API."""
     if not resume_info:
-        logging.warning("No resume info object provided.")
+        log.warning("helpers.upload_resume_to_gemini.no_resume_info")
         return None
 
     resume_url = resume_info.get('file_link') or resume_info.get('url')
 
     if not resume_url:
-        logging.warning(f"No 'file_link' or 'url' found in resume_info object: {resume_info}")
+        log.warning("helpers.upload_resume_to_gemini.missing_resume_link")
         return None
 
     try:
@@ -359,12 +427,24 @@ def upload_resume_to_gemini(resume_info):
                 file_response.content, 
                 original_filename
             )
-            logging.info(f"File '{original_filename}' converted to MIME type '{final_mime_type}'")
+            log.info(
+                "helpers.upload_resume_to_gemini.converted",
+                filename=original_filename,
+                mime_type=final_mime_type,
+            )
         except UnsupportedFileTypeError as e:
-            logging.error(f"Cannot upload file '{original_filename}': {e}")
+            log.error(
+                "helpers.upload_resume_to_gemini.upload_failed",
+                filename=original_filename,
+                error=str(e),
+            )
             return None
 
-        logging.info(f"Uploading '{original_filename}' with MIME type '{final_mime_type}' to Gemini.")
+        log.info(
+            "helpers.upload_resume_to_gemini.uploading",
+            filename=original_filename,
+            mime_type=final_mime_type,
+        )
 
         # Create temporary file with proper extension for final format
         file_ext = '.txt' if final_mime_type == 'text/plain' else os.path.splitext(original_filename)[1]
@@ -380,7 +460,10 @@ def upload_resume_to_gemini(resume_info):
                 mime_type=final_mime_type
             )
             
-            logging.info(f"Completed uploading '{gemini_file.display_name}' to Gemini.")
+            log.info(
+                "helpers.upload_resume_to_gemini.upload_complete",
+                filename=gemini_file.display_name,
+            )
             return gemini_file
             
         finally:
@@ -388,13 +471,24 @@ def upload_resume_to_gemini(resume_info):
             try:
                 os.unlink(tmp_file.name)
             except OSError as cleanup_error:
-                logging.warning(f"Could not clean up temp file {tmp_file.name}: {cleanup_error}")
+                log.warning(
+                    "helpers.upload_resume_to_gemini.cleanup_failed",
+                    temp_file=tmp_file.name,
+                    error=str(cleanup_error),
+                )
 
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error downloading resume from {resume_url}: {e}")
+        log.error(
+            "helpers.upload_resume_to_gemini.download_failed",
+            url=resume_url,
+            error=str(e),
+        )
         return None
     except Exception as e:
-        logging.error(f"An unexpected error occurred during resume upload: {e}")
+        log.error(
+            "helpers.upload_resume_to_gemini.unexpected_error",
+            error=str(e),
+        )
         return None
 
 def generate_ai_response(model, prompt_parts):
@@ -403,7 +497,7 @@ def generate_ai_response(model, prompt_parts):
         response = model.generate_content(prompt_parts)
         return response.text
     except Exception as e:
-        logging.error(f"Error during AI content generation: {e}")
+        log.error("helpers.generate_html_summary.error", error=str(e))
         return None
 
 def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, model):
@@ -425,7 +519,7 @@ def generate_html_summary(candidate_data, job_data, interview_data, additional_c
     prompt_parts = [full_prompt]
     if gemini_resume_file:
         prompt_parts.append(gemini_resume_file)
-        logging.info("Resume file included in the prompt for AI generation.")
+        log.info("helpers.generate_html_summary.resume_included")
 
     html_summary = generate_ai_response(model, prompt_parts)
 
