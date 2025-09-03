@@ -91,20 +91,41 @@ def test_interview():
     """Tests the connection to the AlphaRun interview API."""
     current_app.logger.info("\n--- Endpoint Hit: /api/test-interview ---")
     data = request.get_json()
-    interview_id = data.get('interview_id')
-    alpharun_job_id = data.get('alpharun_job_id')
 
-    if not interview_id or not alpharun_job_id:
-        return jsonify({'error': 'Missing interview_id or alpharun_job_id'}), 400
+    candidate_slug = data.get('candidate_slug')
+    job_slug = data.get('job_slug')
 
-    # The interview_id from the frontend is already cleaned by the /test-candidate endpoint.
+    if not candidate_slug or not job_slug:
+        return jsonify({'error': 'Missing candidate_slug or job_slug'}), 400
+
+    # Obtain the interview ID from RecruitCRM, checking job-associated fields first
+    interview_id = fetch_candidate_interview_id(candidate_slug, job_slug)
+    if not interview_id:
+        return jsonify({'error': 'No AI Interview ID found for this candidate and job'}), 404
+
+    # Fetch the AlphaRun job ID from the job's custom fields
+    job_data = fetch_recruitcrm_job(job_slug)
+    alpharun_job_id = None
+    if job_data:
+        job_details = job_data.get('data', job_data)
+        for field in job_details.get('custom_fields', []):
+            if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
+                alpharun_job_id = field.get('value')
+                break
+
+    if not alpharun_job_id:
+        return jsonify({'error': 'AlphaRun job ID not found for this job'}), 404
+
     interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
 
     if interview_data:
         contact = interview_data.get('data', {}).get('interview', {}).get('contact', {})
         return jsonify({
-            'success': True, 'message': 'Interview confirmed',
-            'candidate_name': f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()
+            'success': True,
+            'message': 'Interview confirmed',
+            'candidate_name': f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip(),
+            'interview_id': interview_id,
+            'alpharun_job_id': alpharun_job_id
         })
     return jsonify({'error': 'Failed to fetch interview data'}), 404
 

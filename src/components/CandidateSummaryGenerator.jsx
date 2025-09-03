@@ -103,28 +103,21 @@ const CandidateSummaryGenerator = () => {
     }, [API_BASE_URL]);
 
     useEffect(() => {
-        const candidateData = apiStatus.candidate.data;
-        const jobData = apiStatus.job.data;
-        if (candidateData?.success && candidateData.interview_id) {
-            setFormData(prev => ({ ...prev, interview_id: candidateData.interview_id }));
-        }
-        if (jobData?.success && jobData.alpharun_job_id) {
-            setFormData(prev => ({ ...prev, alpharun_job_id: jobData.alpharun_job_id }));
-        }
-    }, [apiStatus.candidate.data, apiStatus.job.data]);
-
-    useEffect(() => {
         if (apiStatus.candidate.status === 'success' && formData.candidate_slug) {
             testApi('resume', { candidate_slug: formData.candidate_slug });
         }
     }, [apiStatus.candidate.status, formData.candidate_slug]);
 
     useEffect(() => {
-        const { interview_id, alpharun_job_id } = formData;
-        if (interview_id && alpharun_job_id && apiStatus.interview.status === 'pending') {
-            testApi('interview', { interview_id, alpharun_job_id });
+        const interviewData = apiStatus.interview.data;
+        if (interviewData?.success) {
+            setFormData(prev => ({
+                ...prev,
+                interview_id: interviewData.interview_id || prev.interview_id,
+                alpharun_job_id: interviewData.alpharun_job_id || prev.alpharun_job_id
+            }));
         }
-    }, [formData.interview_id, formData.alpharun_job_id]);
+    }, [apiStatus.interview.data]);
 
     const testApi = async (apiType, payload) => {
         if (!API_BASE_URL) return;
@@ -159,7 +152,7 @@ const CandidateSummaryGenerator = () => {
             const jobSlug = match[1];
             const candidateSlug = match[2];
 
-            showAlert('info', 'URL parsed. Confirming Job and Candidate...');
+            showAlert('info', 'URL parsed. Confirming Job, Candidate & Interview...');
 
             setFormData(prev => ({
                 ...prev,
@@ -169,6 +162,7 @@ const CandidateSummaryGenerator = () => {
 
             testApi('job', { job_slug: jobSlug });
             testApi('candidate', { candidate_slug: candidateSlug });
+            testApi('interview', { candidate_slug: candidateSlug, job_slug: jobSlug });
         } else {
             showAlert('error', 'Could not parse the URL. Please check the format and try again.');
         }
