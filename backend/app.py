@@ -3,12 +3,14 @@
 import os
 import logging
 import sys
+import structlog
+from flask import Flask, jsonify, request
+import uuid
 
 # Add the project's root directory to the Python path
 # This MUST be at the top, before other local imports
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -37,14 +39,36 @@ CORS(app,
      )
 
 # --- Configure Logging ---
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.set_exc_info,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer()
+    ],
+    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+    context_class=dict,
+    logger_factory=structlog.PrintLoggerFactory(),
+)
+
+log = structlog.get_logger()
+
+
+@app.before_request
+def before_request():
+    request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())
+    structlog.contextvars.bind_contextvars(request_id=request_id)
 
 # --- Environment Variable Checks ---
 # (These are used by helpers, but good to check at startup)
 required_keys = ['RECRUITCRM_API_KEY', 'ALPHARUN_API_KEY', 'GOOGLE_API_KEY', 'FIREFLIES_API_KEY']
 for key in required_keys:
     if not os.getenv(key):
-        app.logger.error(f"!!! FATAL ERROR: {key} environment variable is not set.")
+        log.error("environment_variable_not_set", variable=key)
 
 # --- Configure Google Gemini ---
 try:
@@ -52,18 +76,18 @@ try:
     genai.configure(api_key=GOOGLE_API_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash')
     app.model = model  # Attach model to app context
-    app.logger.info("LOG: Google Gemini configured successfully.")
+    log.info("google_gemini.configured")
 except Exception as e:
-    app.logger.error(f"!!! FATAL ERROR: Could not configure Google Gemini: {e}")
+    log.error("google_gemini.configuration_failed", error=str(e))
     app.model = None
 
 # --- Firestore Configuration ---
 try:
     db = firestore.Client()
     app.db = db  # Attach db to app context
-    app.logger.info("LOG: Firestore client initialized successfully.")
+    log.info("firestore_client.initialized")
 except Exception as e:
-    app.logger.error(f"!!! FATAL ERROR: Could not initialize Firestore client: {e}")
+    log.error("firestore_client.initialization_failed", error=str(e))
     app.db = None
 
 
@@ -86,7 +110,7 @@ app.register_blueprint(bulk_bp, url_prefix='/api')
 @app.route('/health', methods=['GET'])
 def health_check():
     """A simple health check endpoint to confirm the server is running."""
-    app.logger.info("LOG: Health check endpoint was hit.")
+    log.info("health_check.endpoint.hit")
     return jsonify({'status': 'healthy'}), 200
 
 

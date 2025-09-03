@@ -1,6 +1,8 @@
 import os
 import json
-import logging
+import structlog
+
+log = structlog.get_logger()
 
 SINGLE_CANDIDATE_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'single-candidate-prompts')
 MULTIPLE_CANDIDATES_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'multiple-candidates-prompts')
@@ -22,7 +24,7 @@ def get_available_prompts(prompt_category="single"):
         raise ValueError(f"Invalid prompt_category: {prompt_category}. Use 'single' or 'multiple'.")
     
     if not os.path.exists(prompts_dir):
-        logging.error(f"Prompts directory not found at: {prompts_dir}")
+        log.error("prompts.directory_not_found", path=prompts_dir)
         return prompts
 
     for root, dirs, files in os.walk(prompts_dir):
@@ -40,7 +42,7 @@ def get_available_prompts(prompt_category="single"):
                             'sort_order': data.get('sort_order', 999) # Defaults to 999 if key is missing
                         })
                 except Exception as e:
-                    logging.error(f"Error loading prompt {file}: {e}")
+                    log.error("prompts.loading_failed", file=file, error=str(e))
 
     # --- CHANGE 2: Sort by the new 'sort_order' key ---
     return sorted(prompts, key=lambda p: p['sort_order'])
@@ -67,7 +69,7 @@ def get_prompt(prompt_type="recruitment.detailed", prompt_category="single"):
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        logging.error(f"Error reading or parsing prompt file {file_path}: {e}")
+        log.error("prompts.reading_failed", file_path=file_path, error=str(e))
         raise
 
 def build_full_prompt(prompt_type, prompt_category="single", **kwargs):
@@ -105,3 +107,4 @@ def build_full_prompt(prompt_type, prompt_category="single", **kwargs):
     user_prompt = config['user_prompt'].format(**format_args)
 
     return f"{full_system}\n\n{user_prompt}"
+

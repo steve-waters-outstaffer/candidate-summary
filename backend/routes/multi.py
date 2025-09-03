@@ -3,6 +3,7 @@
 import json
 import re
 from flask import Blueprint, request, jsonify, current_app
+import structlog
 
 from config.prompts import build_full_prompt
 from helpers import (
@@ -17,12 +18,14 @@ from helpers import (
     fetch_recruitcrm_candidate_job_specific_fields
 )
 
+log = structlog.get_logger()
+
 multi_bp = Blueprint('multi_api', __name__)
 
 @multi_bp.route('/generate-multiple-candidates', methods=['POST'])
 def generate_multiple_candidates():
     """Generates content for multiple candidates."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/generate-multiple-candidates ---")
+    log.info("multi.generate_multiple_candidates.hit")
     try:
         data = request.get_json()
         candidate_slugs = data.get('candidate_slugs', [])
@@ -36,7 +39,11 @@ def generate_multiple_candidates():
         if not candidate_slugs or not job_slug:
             return jsonify({'error': 'At least one candidate slug and a job slug are required'}), 400
 
-        current_app.logger.info(f"Processing {len(candidate_slugs)} candidates for job {job_slug}")
+        log.info(
+            "multi.generate_multiple_candidates.processing",
+            candidate_count=len(candidate_slugs),
+            job_slug=job_slug,
+        )
 
         job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True)
         if not job_data:
@@ -51,7 +58,10 @@ def generate_multiple_candidates():
                 break
 
         if not alpharun_job_id:
-            current_app.logger.warning(f"Missing AI Job ID for job {job_slug}; AlphaRun interviews will be skipped.")
+            log.warning(
+                "multi.generate_multiple_candidates.missing_ai_job_id",
+                job_slug=job_slug,
+            )
 
         all_job_candidates = fetch_recruitcrm_assigned_candidates(job_slug)
         candidate_map = {c.get('candidate', {}).get('slug'): c.get('candidate', {}) for c in all_job_candidates}
@@ -63,7 +73,10 @@ def generate_multiple_candidates():
         for i, slug in enumerate(candidate_slugs):
             candidate_details = candidate_map.get(slug)
             if not candidate_details:
-                current_app.logger.warning(f"Could not find candidate with slug {slug} in the assigned list.")
+                log.warning(
+                    "multi.generate_multiple_candidates.candidate_not_found",
+                    candidate_slug=slug,
+                )
                 failed_candidates.append(slug)
                 continue
 
@@ -87,7 +100,10 @@ def generate_multiple_candidates():
                 if interview_id:
                     interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                 else:
-                    current_app.logger.warning(f"Missing AI Interview ID for candidate {slug}; skipping AlphaRun call.")
+                    log.warning(
+                        "multi.generate_multiple_candidates.missing_ai_interview_id",
+                        candidate_slug=slug,
+                    )
 
             candidates_data.append({
                 'basic_data': {'data': candidate_details},
@@ -127,13 +143,13 @@ def generate_multiple_candidates():
         return jsonify({'success': True, 'generated_content': final_content}), 200
 
     except Exception as e:
-        current_app.logger.error(f"!!! EXCEPTION in generate_multiple_candidates: {e}")
+        log.error("multi.generate_multiple_candidates.error", error=str(e))
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 @multi_bp.route('/process-curated-candidates', methods=['POST'])
 def process_curated_candidates():
     """Processes a curated list of candidates for a specific job."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/process-curated-candidates ---")
+    log.info("multi.process_curated_candidates.hit")
     data = request.get_json()
     job_slug = data.get('job_slug')
     candidate_slugs = data.get('candidate_slugs', [])
@@ -222,7 +238,7 @@ def process_curated_candidates():
                     link = data.get('job_url')
                     email_html = cleaned_content.replace('[HERE_LINK]', f'<a href="{link}">here</a>') if link else cleaned_content
             except Exception as e:
-                current_app.logger.error(f"Failed to generate email content for curated list: {e}")
+                log.error("multi.process_curated_candidates.email_generation_failed", error=str(e))
 
         final_response = {'success': True}
         if generate_summaries:
@@ -234,5 +250,5 @@ def process_curated_candidates():
         return jsonify(final_response), 200
 
     except Exception as e:
-        current_app.logger.error(f"!!! TOP-LEVEL EXCEPTION in process_curated_candidates: {e}")
+        log.error("multi.process_curated_candidates.error", error=str(e))
         return jsonify({'error': str(e)}), 500

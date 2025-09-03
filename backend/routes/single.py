@@ -3,6 +3,7 @@
 import datetime
 import re
 from flask import Blueprint, request, jsonify, current_app
+import structlog
 
 from config.prompts import get_available_prompts
 from helpers import (
@@ -20,24 +21,26 @@ from helpers import (
 )
 import requests
 
+log = structlog.get_logger()
+
 single_bp = Blueprint('single_api', __name__)
 
 @single_bp.route('/prompts', methods=['GET'])
 def list_prompts():
     """Returns a list of available prompt configurations."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/prompts ---")
+    log.info("single.prompts.hit")
     try:
         category = request.args.get('category', 'single')  # Default to single
         prompts = get_available_prompts(category)
         return jsonify(prompts), 200
     except Exception as e:
-        current_app.logger.error(f"!!! EXCEPTION in list_prompts: {e}")
+        log.error("single.prompts.error", error=str(e))
         return jsonify({'error': 'Could not retrieve prompt list from server'}), 500
 
 @single_bp.route('/test-candidate', methods=['POST'])
 def test_candidate():
     """Tests the connection to the RecruitCRM candidate API."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/test-candidate ---")
+    log.info("single.test_candidate.hit")
     data = request.get_json()
     slug = data.get('candidate_slug')
     if not slug:
@@ -64,7 +67,7 @@ def test_candidate():
 @single_bp.route('/test-job', methods=['POST'])
 def test_job():
     """Tests the connection to the RecruitCRM job API."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/test-job ---")
+    log.info("single.test_job.hit")
     data = request.get_json()
     slug = data.get('job_slug')
     if not slug:
@@ -89,7 +92,7 @@ def test_job():
 @single_bp.route('/test-interview', methods=['POST'])
 def test_interview():
     """Tests the connection to the AlphaRun interview API."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/test-interview ---")
+    log.info("single.test_interview.hit")
     data = request.get_json()
 
     candidate_slug = data.get('candidate_slug')
@@ -132,7 +135,7 @@ def test_interview():
 @single_bp.route('/test-fireflies', methods=['POST'])
 def test_fireflies():
     """Tests the connection to the Fireflies API and returns the meeting title."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/test-fireflies ---")
+    log.info("single.test_fireflies.hit")
     data = request.get_json()
 
     # Check for both 'fireflies_url' and 'transcript_url' to handle inconsistency
@@ -157,7 +160,7 @@ def test_fireflies():
 @single_bp.route('/test-resume', methods=['POST'])
 def test_resume():
     """Checks for the presence of a resume in the candidate data."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/test-resume ---")
+    log.info("single.test_resume.hit")
     data = request.get_json()
     candidate_slug = data.get('candidate_slug')
     if not candidate_slug:
@@ -182,7 +185,7 @@ def test_resume():
 @single_bp.route('/generate-summary', methods=['POST'])
 def generate_summary():
     """Generate candidate summary, optionally including Fireflies and interview data."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/generate-summary ---")
+    log.info("single.generate_summary.hit")
     try:
         data = request.get_json()
         candidate_slug = data.get('candidate_slug')
@@ -252,45 +255,49 @@ def generate_summary():
             return jsonify({'error': 'Failed to generate summary from AI model'}), 500
 
     except Exception as e:
-        current_app.logger.error(f"!!! TOP-LEVEL EXCEPTION in generate_summary: {e}")
+        log.error("single.generate_summary.error", error=str(e))
         return jsonify({'error': str(e)}), 500
 
 @single_bp.route('/push-to-recruitcrm', methods=['POST'])
 def push_to_recruitcrm():
     """Push generated summary to RecruitCRM candidate record"""
-    current_app.logger.info("\n--- Endpoint Hit: /api/push-to-recruitcrm ---")
+    log.info("single.push_to_recruitcrm.hit")
     try:
         data = request.get_json()
         candidate_slug = data.get('candidate_slug')
         html_summary = data.get('html_summary')
-        current_app.logger.info(f"Candidate slug: {candidate_slug}, HTML length: {len(html_summary) if html_summary else 0}")
+        log.info(
+            "single.push_to_recruitcrm.request",
+            candidate_slug=candidate_slug,
+            html_length=len(html_summary) if html_summary else 0,
+        )
 
         if not candidate_slug or not html_summary:
-            current_app.logger.error("Missing candidate slug or HTML summary")
+            log.error("single.push_to_recruitcrm.missing_data")
             return jsonify({'error': 'Missing candidate slug or HTML summary'}), 400
 
         url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
         files = {'candidate_summary': (None, html_summary)}
-        current_app.logger.info(f"Making request to: {url}")
+        log.info("single.push_to_recruitcrm.request.sent", url=url)
 
         response = requests.post(url, files=files, headers=get_recruitcrm_headers())
-        current_app.logger.info(f"RecruitCRM response status: {response.status_code}")
+        log.info("single.push_to_recruitcrm.response", status=response.status_code)
 
         if response.status_code == 200:
-            current_app.logger.info("SUCCESS: Summary pushed to RecruitCRM")
+            log.info("single.push_to_recruitcrm.success")
             return jsonify({'success': True, 'message': 'Summary pushed to RecruitCRM successfully'})
         else:
-            current_app.logger.error(f"!!! ERROR: Failed to update RecruitCRM: {response.text}")
+            log.error("single.push_to_recruitcrm.failed", status=response.status_code)
             return jsonify({'error': f'Failed to update RecruitCRM: {response.text}'}), 500
 
     except Exception as e:
-        current_app.logger.error(f"!!! TOP-LEVEL EXCEPTION in push_to_recruitcrm: {e}")
+        log.error("single.push_to_recruitcrm.exception", error=str(e))
         return jsonify({'error': str(e)}), 500
 
 @single_bp.route('/log-feedback', methods=['POST'])
 def log_feedback():
     """Receives and logs user feedback on a generated summary to Firestore."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/log-feedback ---")
+    log.info("single.log_feedback.hit")
     db = current_app.db
     if not db:
         return jsonify({'error': 'Firestore is not configured on the server'}), 500
@@ -309,5 +316,5 @@ def log_feedback():
         feedback_ref.set(feedback_data)
         return jsonify({'success': True, 'message': 'Feedback logged successfully'}), 200
     except Exception as e:
-        current_app.logger.error(f"!!! EXCEPTION in log_feedback: {e}")
+        log.error("single.log_feedback.error", error=str(e))
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500

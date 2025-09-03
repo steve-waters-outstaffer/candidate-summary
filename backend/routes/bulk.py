@@ -6,6 +6,7 @@ from collections import defaultdict
 from flask import Blueprint, request, jsonify, current_app
 import uuid
 import threading
+import structlog
 
 # In-memory job store. For a production environment, you might replace this
 # with a more persistent store like Redis or Firestore.
@@ -23,6 +24,8 @@ from helpers import (
     fetch_recruitcrm_candidate_job_specific_fields,
     fetch_recruitcrm_candidate
 )
+
+log = structlog.get_logger()
 
 bulk_bp = Blueprint('bulk_api', __name__)
 
@@ -80,12 +83,18 @@ def process_candidates_background(job_id, app_context):
                         if interview_id:
                             interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                             if interview_data:
-                                current_app.logger.info(f"Successfully fetched AI interview data for candidate {slug}.")
+                                log.info(
+                                    "bulk.process_candidates_background.ai_interview_fetched",
+                                    candidate_slug=slug,
+                                )
                                 has_ai_interview = True
                             else:
-                                current_app.logger.warning(f"Failed to fetch AI interview data for candidate {slug}.")
+                                log.warning(
+                                    "bulk.process_candidates_background.ai_interview_fetch_failed",
+                                    candidate_slug=slug,
+                                )
                     else:
-                        current_app.logger.info("No AI Job ID found for this job, skipping interview search.")
+                        log.info("bulk.process_candidates_background.no_ai_job_id")
 
 
                     summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, model)
@@ -101,7 +110,12 @@ def process_candidates_background(job_id, app_context):
                         raise Exception("AI failed to generate summary.")
 
                 except Exception as e:
-                    current_app.logger.error(f"Error processing candidate {slug} for job {job_id}: {e}")
+                    log.error(
+                        "bulk.process_candidates_background.candidate_error",
+                        candidate_slug=slug,
+                        job_id=job_id,
+                        error=str(e),
+                    )
                     BULK_JOBS[job_id]['results'][slug] = {
                         'status': 'failed',
                         'error': str(e),
@@ -114,14 +128,18 @@ def process_candidates_background(job_id, app_context):
             job_details['status'] = 'complete'
 
         except Exception as e:
-            current_app.logger.error(f"A fatal error occurred in background job {job_id}: {e}")
+            log.error(
+                "bulk.process_candidates_background.fatal_error",
+                job_id=job_id,
+                error=str(e),
+            )
             job_details['status'] = 'failed'
             job_details['error'] = str(e)
 
 @bulk_bp.route('/job-stages-with-counts/<job_slug>', methods=['GET'])
 def get_job_stages_with_counts(job_slug):
     """Fetches job name, and all candidates for a job, counts them by stage, and returns a list of stages that have at least one candidate."""
-    current_app.logger.info(f"\n--- Endpoint Hit: /api/job-stages-with-counts/{job_slug} ---")
+    log.info("bulk.job_stages_with_counts.hit", job_slug=job_slug)
 
     # Attempt to fetch the job details first.
     job_data = fetch_recruitcrm_job(job_slug)
@@ -131,14 +149,14 @@ def get_job_stages_with_counts(job_slug):
         job_name = job_data.get('name')
     else:
         # If we can't get job details with a name, it's a critical failure.
-        current_app.logger.error(f"Failed to fetch valid job data for slug: {job_slug}. Response: {job_data}")
+        log.error("bulk.job_stages_with_counts.fetch_job_failed", job_slug=job_slug)
         return jsonify({'error': 'Job not found or has no name.'}), 404
 
     # Now, fetch candidates.
     all_candidates = fetch_recruitcrm_assigned_candidates(job_slug)
     if not all_candidates:
         # A job can exist with no candidates.
-        current_app.logger.info(f"Job '{job_name}' found, but no candidates are assigned to it.")
+        log.info("bulk.job_stages_with_counts.no_candidates", job_name=job_name)
         return jsonify({'job_name': job_name, 'stages': []}), 200
 
     # If we have candidates, proceed to count them by stage.
@@ -164,7 +182,7 @@ def get_job_stages_with_counts(job_slug):
 @bulk_bp.route('/candidates-in-stage/<job_slug>/<stage_id>', methods=['GET'])
 def get_candidates_in_stage(job_slug, stage_id):
     """Fetches a list of candidates in a specific stage for a job."""
-    current_app.logger.info(f"\n--- Endpoint Hit: /api/candidates-in-stage/{job_slug}/{stage_id} ---")
+    log.info("bulk.candidates_in_stage.hit", job_slug=job_slug, stage_id=stage_id)
     candidates = fetch_recruitcrm_assigned_candidates(job_slug, status_id=stage_id)
 
     formatted_candidates = []
@@ -184,7 +202,7 @@ def start_bulk_process_job():
     Starts an asynchronous job to process summaries for multiple candidates.
     Returns a job ID for polling the status.
     """
-    current_app.logger.info("\n--- Endpoint Hit: /api/bulk-process-job (async) ---")
+    log.info("bulk.process_job.hit")
     data = request.get_json()
     job_url = data.get('job_url')
     single_prompt = data.get('single_candidate_prompt')
@@ -244,7 +262,7 @@ def get_bulk_job_status(job_id):
 @bulk_bp.route('/generate-bulk-email', methods=['POST'])
 def generate_bulk_email():
     """Generates the final multi-candidate email from completed summaries."""
-    current_app.logger.info("\n--- Endpoint Hit: /api/generate-bulk-email ---")
+    log.info("bulk.generate_bulk_email.hit")
     data = request.get_json()
     job_id = data.get('job_id')
     multi_prompt = data.get('multi_candidate_prompt')
@@ -307,5 +325,5 @@ def generate_bulk_email():
             raise Exception("AI model failed to generate email content.")
 
     except Exception as e:
-        current_app.logger.error(f"Error generating bulk email for job {job_id}: {e}")
+        log.error("bulk.generate_bulk_email.error", job_id=job_id, error=str(e))
         return jsonify({'error': str(e)}), 500
