@@ -1,31 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-    Box,
-    Card,
-    CardContent,
-    TextField,
-    Button,
-    Typography,
-    Alert,
-    CircularProgress,
-    Paper,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
-    FormGroup,
-    FormControlLabel,
-    Accordion,
-    AccordionSummary,
-    AccordionDetails,
-    Grid,
-    Tooltip,
-    Switch
+    Box, Card, CardContent, TextField, Button, Typography, Alert, CircularProgress,
+    FormControl, InputLabel, Select, MenuItem, FormGroup, FormControlLabel, Switch,
+    Stepper, Step, StepLabel, Grid, Paper, Accordion, AccordionSummary, AccordionDetails,
+    Divider, List, ListItem, ListItemIcon, ListItemText
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import { debounce } from 'lodash';
 
 const BulkGenerator = () => {
     const [jobUrl, setJobUrl] = useState('');
@@ -33,94 +16,141 @@ const BulkGenerator = () => {
     const [selectedStage, setSelectedStage] = useState('');
     const [singleCandidatePrompt, setSingleCandidatePrompt] = useState('');
     const [multiCandidatePrompt, setMultiCandidatePrompt] = useState('');
-    const [availableSinglePrompts, setAvailableSinglePrompts] = useState([]);
-    const [availableMultiPrompts, setAvailableMultiPrompts] = useState([]);
-    const [generateEmail, setGenerateEmail] = useState(true);
-    const [autoPush, setAutoPush] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [jobLoading, setJobLoading] = useState(false);
+    const [availablePrompts, setAvailablePrompts] = useState({ single: [], multiple: [] });
     const [alert, setAlert] = useState({ show: false, type: 'info', message: '' });
-    const [results, setResults] = useState(null);
-    const [pushStatuses, setPushStatuses] = useState({});
 
-    // --- NEW: State for email detail inputs ---
-    const [emailDetails, setEmailDetails] = useState({
-        client_name: '',
-        preferred_candidate: '',
-        additional_context: '',
-        outstaffer_platform_url: ''
-    });
+    // Loading States
+    const [stagesLoading, setStagesLoading] = useState(false);
+    const [candidatesLoading, setCandidatesLoading] = useState(false);
+    const [processingLoading, setProcessingLoading] = useState(false);
+    const [emailLoading, setEmailLoading] = useState(false);
+
+    // Data & State
+    const [candidateList, setCandidateList] = useState([]);
+    const [selectedCandidates, setSelectedCandidates] = useState({});
+    const [jobId, setJobId] = useState(null);
+    const [results, setResults] = useState(null);
+
 
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+    // Fetch available prompts on component mount
     useEffect(() => {
-        fetchAvailablePrompts('single', setAvailableSinglePrompts, setSingleCandidatePrompt);
-        fetchAvailablePrompts('multiple', setAvailableMultiPrompts, setMultiCandidatePrompt);
+        const fetchPrompts = async (category) => {
+            if (!API_BASE_URL) return;
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/prompts?category=${category}`);
+                if (response.ok) {
+                    const prompts = await response.json();
+                    setAvailablePrompts(prev => ({ ...prev, [category]: prompts }));
+                    if (prompts.length > 0) {
+                        if (category === 'single') setSingleCandidatePrompt(prompts[0].id);
+                        if (category === 'multiple') setMultiCandidatePrompt(prompts[0].id);
+                    }
+                }
+            } catch (error) {
+                console.error(`Error fetching ${category} prompts:`, error);
+            }
+        };
+        fetchPrompts('single');
+        fetchPrompts('multiple');
     }, []);
 
-    const fetchAvailablePrompts = async (category, setter, defaultSetter) => {
-        if (!API_BASE_URL) return;
+    const showAlert = (type, message) => {
+        setAlert({ show: true, type, message });
+    };
+
+    const resetState = () => {
+        setJobStages([]);
+        setSelectedStage('');
+        setCandidateList([]);
+        setSelectedCandidates({});
+        setJobId(null);
+        setResults(null);
+    };
+
+    // --- Step 1: Fetch Job Stages ---
+    const fetchJobStages = async (url) => {
+        const slugMatch = url.match(/\/job(?:s)?\/([a-zA-Z0-9]+)/);
+        if (!slugMatch || !slugMatch[1]) {
+            resetState();
+            return;
+        }
+        const jobSlug = slugMatch[1];
+        setStagesLoading(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/prompts?category=${category}`);
+            const response = await fetch(`${API_BASE_URL}/api/job-stages-with-counts/${jobSlug}`);
             if (response.ok) {
-                const prompts = await response.json();
-                setter(prompts);
-                if (prompts.length > 0) {
-                    defaultSetter(prompts[0].id);
+                const stages = await response.json();
+                setJobStages(stages);
+                if (stages.length === 0) {
+                    showAlert('info', 'No candidates found in any active stage for this job.');
                 }
+            } else {
+                showAlert('error', 'Could not fetch candidate stages for this job.');
             }
         } catch (error) {
-            console.error(`Error fetching ${category} prompts:`, error);
+            console.error('Error fetching job stages:', error);
+        } finally {
+            setStagesLoading(false);
         }
     };
+
+    const debouncedFetchJobStages = useCallback(debounce(fetchJobStages, 500), []);
 
     const handleJobUrlChange = (e) => {
         const url = e.target.value;
         setJobUrl(url);
-        const match = url.match(/\/job\/([a-zA-Z0-9]+)/);
-        if (match && match[1]) {
-            const slug = match[1];
-            fetchJobStages(slug);
-        } else {
-            setJobStages([]);
-            setSelectedStage('');
+        resetState();
+        debouncedFetchJobStages(url);
+    };
+
+
+    // --- Step 2: Fetch Candidates in Selected Stage ---
+    const handleStageChange = async (stageId) => {
+        setSelectedStage(stageId);
+        if (!stageId) {
+            setCandidateList([]);
+            return;
         }
-    };
-
-    // --- NEW: Handler for email detail inputs ---
-    const handleEmailDetailsChange = (e) => {
-        const { name, value } = e.target;
-        setEmailDetails(prev => ({ ...prev, [name]: value }));
-    };
-
-    const fetchJobStages = async (jobSlug) => {
-        setJobLoading(true);
+        setCandidatesLoading(true);
+        const jobSlug = jobUrl.match(/\/job(?:s)?\/([a-zA-Z0-9]+)/)[1];
         try {
-            const url = `${API_BASE_URL}/api/job-stages-with-counts/${jobSlug}`;
-            const response = await fetch(url);
+            const response = await fetch(`${API_BASE_URL}/api/candidates-in-stage/${jobSlug}/${stageId}`);
             if (response.ok) {
-                const stages = await response.json();
-                setJobStages(stages);
-                if (stages.length > 0) {
-                    setSelectedStage(stages[0].status_id);
-                }
-            } else {
-                showAlert('error', 'Could not fetch job stages. Please check the URL.');
-                setJobStages([]);
+                const candidates = await response.json();
+                setCandidateList(candidates);
+                const initialSelection = candidates.reduce((acc, cand) => {
+                    acc[cand.slug] = true; // Select all by default
+                    return acc;
+                }, {});
+                setSelectedCandidates(initialSelection);
             }
         } catch (error) {
-            console.error('Error in fetchJobStages:', error);
-            showAlert('error', 'Network error fetching job stages.');
+            console.error('Error fetching candidates:', error);
+            showAlert('error', 'Could not fetch the list of candidates.');
         } finally {
-            setJobLoading(false);
+            setCandidatesLoading(false);
         }
     };
 
+    const handleCandidateToggle = (slug) => {
+        setSelectedCandidates(prev => ({ ...prev, [slug]: !prev[slug] }));
+    };
+
+
+    // --- Step 3: Start Bulk Processing ---
     const handleBulkProcess = async () => {
-        setLoading(true);
-        setResults(null);
-        setPushStatuses({});
+        const slugsToProcess = Object.keys(selectedCandidates).filter(slug => selectedCandidates[slug]);
+        if (slugsToProcess.length === 0) {
+            showAlert('error', 'Please select at least one candidate.');
+            return;
+        }
+
+        setProcessingLoading(true);
         setAlert({ show: false });
+        setResults(null);
+        setJobId(null);
 
         try {
             const response = await fetch(`${API_BASE_URL}/api/bulk-process-job`, {
@@ -128,265 +158,203 @@ const BulkGenerator = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     job_url: jobUrl,
-                    status_id: selectedStage,
                     single_candidate_prompt: singleCandidatePrompt,
-                    multi_candidate_prompt: multiCandidatePrompt,
-                    generate_email: generateEmail,
-                    auto_push: autoPush,
-                    // --- NEW: Pass email details to backend ---
-                    client_name: emailDetails.client_name,
-                    preferred_candidate: emailDetails.preferred_candidate,
-                    additional_context: emailDetails.additional_context,
-                    outstaffer_platform_url: emailDetails.outstaffer_platform_url
-                }),
+                    candidate_slugs: slugsToProcess
+                })
+            });
+            const data = await response.json();
+            if (response.status === 202) {
+                setJobId(data.job_id);
+                pollJobStatus(data.job_id);
+            } else {
+                showAlert('error', data.error || 'Failed to start bulk process.');
+                setProcessingLoading(false);
+            }
+        } catch (error) {
+            showAlert('error', 'A network error occurred while starting the process.');
+            setProcessingLoading(false);
+        }
+    };
+
+    const pollJobStatus = (id) => {
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/bulk-job-status/${id}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    setResults(data);
+                    if (data.status === 'complete') {
+                        clearInterval(interval);
+                        setProcessingLoading(false);
+                        showAlert('success', 'All summaries have been processed!');
+                    }
+                } else {
+                    clearInterval(interval);
+                    setProcessingLoading(false);
+                    showAlert('error', 'Error fetching job status.');
+                }
+            } catch (error) {
+                clearInterval(interval);
+                setProcessingLoading(false);
+                showAlert('error', 'A network error occurred while polling for status.');
+            }
+        }, 5000); // Poll every 5 seconds
+    };
+
+    // --- Step 4: Generate Final Email ---
+    const handleGenerateEmail = async () => {
+        if (!jobId || !multiCandidatePrompt) {
+            showAlert('error', 'Job ID or email prompt is missing.');
+            return;
+        }
+
+        setEmailLoading(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/generate-bulk-email`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    multi_candidate_prompt: multiCandidatePrompt
+                })
             });
 
             const data = await response.json();
             if (response.ok) {
-                setResults(data);
-                showAlert('success', `Processing complete. Found ${data.candidates_found} candidates.`);
+                setResults(prev => ({ ...prev, email_html: data.email_html }));
+                showAlert('success', 'Email generated successfully!');
             } else {
-                showAlert('error', data.error || 'An unknown error occurred.');
+                showAlert('error', data.error || 'Failed to generate email.');
             }
         } catch (error) {
-            showAlert('error', 'A network error occurred during bulk processing.');
+            showAlert('error', 'A network error occurred while generating the email.');
         } finally {
-            setLoading(false);
+            setEmailLoading(false);
         }
     };
 
-    const handlePushToCrm = async (candidateSlug, summaryHtml) => {
-        setPushStatuses(prev => ({ ...prev, [candidateSlug]: { status: 'loading' } }));
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/push-to-recruitcrm`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    candidate_slug: candidateSlug,
-                    html_summary: summaryHtml,
-                }),
-            });
 
-            if (response.ok) {
-                setPushStatuses(prev => ({ ...prev, [candidateSlug]: { status: 'success' } }));
-            } else {
-                const errorData = await response.json();
-                setPushStatuses(prev => ({ ...prev, [candidateSlug]: { status: 'error', message: errorData.error } }));
-            }
-        } catch (error) {
-            setPushStatuses(prev => ({ ...prev, [candidateSlug]: { status: 'error', message: 'Network error' } }));
-        }
-    };
+    const getCandidateName = (slug) => {
+        const candidate = candidateList.find(c => c.slug === slug);
+        return candidate ? candidate.name : slug;
+    }
 
-    const handlePushAllToCrm = async () => {
-        if (!results || !results.summaries) return;
-        for (const summary of results.summaries) {
-            if (pushStatuses[summary.slug]?.status !== 'success') {
-                await handlePushToCrm(summary.slug, summary.html);
-            }
-        }
-    };
+    const totalSelected = Object.values(selectedCandidates).filter(Boolean).length;
 
-    const showAlert = (type, message) => {
-        setAlert({ show: true, type, message });
-    };
-
-    const renderPushStatusIcon = (slug) => {
-        const status = pushStatuses[slug];
-        if (!status) return null;
-        switch (status.status) {
-            case 'loading':
-                return <CircularProgress size={24} sx={{ ml: 1 }} />;
-            case 'success':
-                return (
-                    <Tooltip title="Pushed successfully">
-                        <CheckCircleIcon color="success" sx={{ ml: 1 }} />
-                    </Tooltip>
-                );
-            case 'error':
-                return (
-                    <Tooltip title={status.message || 'An error occurred'}>
-                        <ErrorIcon color="error" sx={{ ml: 1 }} />
-                    </Tooltip>
-                );
-            default:
-                return null;
-        }
-    };
 
     return (
-        <Box>
-            {alert.show && <Alert severity={alert.type} sx={{ mb: 2 }} onClose={() => setAlert({ show: false })}>{alert.message}</Alert>}
-            <Grid container spacing={3}>
-                <Grid item xs={12} md={5}>
-                    <Card>
-                        <CardContent>
-                            <Typography variant="h4" gutterBottom>Bulk Process Job</Typography>
-                            <TextField
-                                label="RecruitCRM Job URL"
-                                value={jobUrl}
-                                onChange={handleJobUrlChange}
-                                onPaste={handleJobUrlChange}
-                                fullWidth
-                                sx={{ mb: 2 }}
-                                placeholder="Paste job URL to load stages..."
-                            />
-                            {jobLoading ? <CircularProgress sx={{ mb: 2 }} /> : (
-                                <FormControl fullWidth sx={{ mb: 2 }} disabled={jobStages.length === 0}>
-                                    <InputLabel>Candidate Stage</InputLabel>
-                                    <Select value={selectedStage} onChange={(e) => setSelectedStage(e.target.value)} label="Candidate Stage">
-                                        {jobStages.map((stage) => (
-                                            <MenuItem key={stage.status_id} value={stage.status_id}>
-                                                {stage.label} ({stage.candidate_count} candidates)
-                                            </MenuItem>
-                                        ))}
-                                    </Select>
-                                </FormControl>
-                            )}
-                            <FormControl fullWidth sx={{ mb: 2 }}>
-                                <InputLabel>Summary Generation Prompt</InputLabel>
-                                <Select value={singleCandidatePrompt} onChange={(e) => setSingleCandidatePrompt(e.target.value)} label="Summary Generation Prompt">
-                                    {availableSinglePrompts.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
-                                </Select>
-                            </FormControl>
-                            <FormGroup>
-                                <FormControlLabel
-                                    control={<Switch checked={generateEmail} onChange={(e) => setGenerateEmail(e.target.checked)} />}
-                                    label="Generate Multi-Candidate Email"
-                                />
-                            </FormGroup>
+        <Grid container spacing={3}>
+            {/* --- Left Column: Setup --- */}
+            <Grid item xs={12} md={5}>
+                <Card>
+                    <CardContent>
+                        <Typography variant="h4" sx={{ mb: 2 }}>Bulk Process Job</Typography>
 
-                            {/* --- MODIFIED: Added email detail form --- */}
-                            {generateEmail && (
-                                <>
-                                    <Typography variant="h6" sx={{ mt: 2, mb: 2 }}>Email Details</Typography>
-                                    <TextField
-                                        label="Client Name"
-                                        name="client_name"
-                                        value={emailDetails.client_name}
-                                        onChange={handleEmailDetailsChange}
-                                        fullWidth sx={{ mb: 2 }}
-                                    />
-                                    <TextField
-                                        label="Preferred Candidate (Optional)"
-                                        name="preferred_candidate"
-                                        value={emailDetails.preferred_candidate}
-                                        onChange={handleEmailDetailsChange}
-                                        fullWidth sx={{ mb: 2 }}
-                                    />
-                                    <TextField
-                                        label="Additional Context (Optional)"
-                                        name="additional_context"
-                                        value={emailDetails.additional_context}
-                                        onChange={handleEmailDetailsChange}
-                                        fullWidth multiline rows={4} sx={{ mb: 2 }}
-                                    />
-                                    <TextField
-                                        label="Outstaffer Platform URL (Optional)"
-                                        name="outstaffer_platform_url"
-                                        value={emailDetails.outstaffer_platform_url}
-                                        onChange={handleEmailDetailsChange}
-                                        fullWidth sx={{ mb: 2 }} placeholder="Link to embed in email..."
-                                    />
-                                    <FormControl fullWidth sx={{ mb: 2, mt: 1 }}>
-                                        <InputLabel>Email Generation Prompt</InputLabel>
-                                        <Select value={multiCandidatePrompt} onChange={(e) => setMultiCandidatePrompt(e.target.value)} label="Email Generation Prompt">
-                                            {availableMultiPrompts.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
-                                        </Select>
-                                    </FormControl>
-                                </>
-                            )}
-                            <FormGroup>
-                                <FormControlLabel
-                                    control={<Switch checked={autoPush} onChange={(e) => setAutoPush(e.target.checked)} />}
-                                    label="Automatically push summaries to RecruitCRM"
-                                />
-                            </FormGroup>
-                            <Button
-                                variant="contained"
-                                onClick={handleBulkProcess}
-                                disabled={loading || !selectedStage}
-                                fullWidth
-                                sx={{ mt: 2 }}
-                                startIcon={loading ? <CircularProgress size={20} color="inherit" /> : null}
-                            >
-                                {loading ? 'Processing...' : 'Start Bulk Process'}
-                            </Button>
-                        </CardContent>
-                    </Card>
-                </Grid>
-                <Grid item xs={12} md={7}>
-                    {results && (
-                        <Card>
-                            <CardContent>
-                                <Typography variant="h5" gutterBottom>
-                                    Results for: {results.job_title}
-                                </Typography>
-                                <Typography variant="body2" color="textSecondary" gutterBottom>
-                                    {results.summaries_generated} summaries generated, {results.failures} failed.
-                                </Typography>
+                        <TextField label="RecruitCRM Job URL" value={jobUrl} onChange={handleJobUrlChange} fullWidth sx={{ mb: 2 }} placeholder="Paste a job URL to begin..." disabled={processingLoading} />
 
-                                {results.summaries_generated > 0 && !autoPush && (
-                                    <Button
-                                        variant="outlined"
-                                        onClick={handlePushAllToCrm}
-                                        startIcon={<CloudUploadIcon />}
-                                        sx={{ my: 2 }}
-                                    >
-                                        Send All to RecruitCRM
+                        <FormControl fullWidth sx={{ mb: 2 }}>
+                            <InputLabel id="stage-label">Hiring Stage</InputLabel>
+                            <Select labelId="stage-label" value={selectedStage} onChange={(e) => handleStageChange(e.target.value)} label="Hiring Stage" disabled={stagesLoading || jobStages.length === 0 || processingLoading}
+                                    startAdornment={stagesLoading && <CircularProgress size={20} sx={{ mr: 1 }} />}>
+                                {jobStages.map((stage) => (
+                                    <MenuItem key={stage.status_id} value={stage.status_id}>
+                                        {`${stage.label} (${stage.candidate_count})`}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                        {candidatesLoading && <CircularProgress />}
+                        {candidateList.length > 0 && (
+                            <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto', mb: 2 }}>
+                                <List dense>
+                                    {candidateList.map((cand) => (
+                                        <ListItem key={cand.slug} secondaryAction={<Switch edge="end" checked={selectedCandidates[cand.slug] || false} onChange={() => handleCandidateToggle(cand.slug)} disabled={processingLoading}/>} disablePadding>
+                                            <ListItemText primary={cand.name} sx={{ pl: 2 }}/>
+                                        </ListItem>
+                                    ))}
+                                </List>
+                            </Paper>
+                        )}
+
+                        <FormControl fullWidth sx={{ mb: 2 }}>
+                            <InputLabel>Individual Summary Prompt</InputLabel>
+                            <Select value={singleCandidatePrompt} onChange={(e) => setSingleCandidatePrompt(e.target.value)} label="Individual Summary Prompt" disabled={processingLoading}>
+                                {availablePrompts.single.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+                            </Select>
+                        </FormControl>
+
+                        <FormControl fullWidth sx={{ mb: 2 }}>
+                            <InputLabel>Multi-Candidate Email Prompt</InputLabel>
+                            <Select value={multiCandidatePrompt} onChange={(e) => setMultiCandidatePrompt(e.target.value)} label="Multi-Candidate Email Prompt" disabled={processingLoading}>
+                                {availablePrompts.multiple.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+                            </Select>
+                        </FormControl>
+
+                        <Button variant="contained" color="primary" onClick={handleBulkProcess} disabled={processingLoading || totalSelected === 0} fullWidth sx={{ mt: 2 }}>
+                            {processingLoading ? <CircularProgress size={24} /> : `Process ${totalSelected} Candidates`}
+                        </Button>
+                    </CardContent>
+                </Card>
+            </Grid>
+
+            {/* --- Right Column: Progress & Results --- */}
+            <Grid item xs={12} md={7}>
+                <Card>
+                    <CardContent>
+                        <Typography variant="h4" sx={{ mb: 2 }}>Progress & Results</Typography>
+                        {alert.show && <Alert severity={alert.type} sx={{ mb: 2 }} onClose={() => setAlert({ show: false })}>{alert.message}</Alert>}
+
+                        {!results && !processingLoading && <Typography color="text.secondary">Results will appear here once processing starts.</Typography>}
+
+                        {results && (
+                            <Box>
+                                <Typography variant="h6" gutterBottom>
+                                    Job Status: {results.status} ({results.processed_count + results.failed_count} / {results.total_candidates} complete)
+                                </Typography>
+                                <Divider sx={{ my: 2 }} />
+
+                                {results.status === 'complete' && !results.email_html && (
+                                    <Button variant="contained" color="secondary" onClick={handleGenerateEmail} disabled={emailLoading} fullWidth sx={{ mb: 2 }}>
+                                        {emailLoading ? <CircularProgress size={24} /> : 'Generate Final Email'}
                                     </Button>
                                 )}
 
-                                {results.summaries && results.summaries.map((summary, index) => (
-                                    <Accordion key={index}>
-                                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                            <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
-                                                <Typography>{summary.name}</Typography>
-                                                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                                    {renderPushStatusIcon(summary.slug)}
-                                                    {!autoPush && pushStatuses[summary.slug]?.status !== 'success' && (
-                                                        <Button
-                                                            variant="outlined"
-                                                            color="success"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handlePushToCrm(summary.slug, summary.html);
-                                                            }}
-                                                            disabled={pushStatuses[summary.slug]?.status === 'loading'}
-                                                            size="small"
-                                                            sx={{ ml: 3 }}
-                                                        >
-                                                            Push to RecruitCRM
-                                                        </Button>
-                                                    )}
-                                                </Box>
-                                            </Box>
-                                        </AccordionSummary>
-                                        <AccordionDetails>
-                                            <Paper variant="outlined" sx={{ p: 2, backgroundColor: '#f9f9f9' }}>
-                                                <Box dangerouslySetInnerHTML={{ __html: summary.html }} />
-                                            </Paper>
-                                        </AccordionDetails>
-                                    </Accordion>
-                                ))}
                                 {results.email_html && (
-                                    <Accordion sx={{ mt: 3 }}>
+                                    <Accordion defaultExpanded>
                                         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                            <Typography sx={{ fontWeight: 'bold' }}>Generated Email</Typography>
+                                            <Typography variant="h6">Generated Email</Typography>
                                         </AccordionSummary>
                                         <AccordionDetails>
-                                            <Paper variant="outlined" sx={{ p: 2 }}>
+                                            <Paper elevation={0} variant="outlined" sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
                                                 <Box dangerouslySetInnerHTML={{ __html: results.email_html }} />
                                             </Paper>
                                         </AccordionDetails>
                                     </Accordion>
                                 )}
-                            </CardContent>
-                        </Card>
-                    )}
-                </Grid>
+
+                                <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Individual Summaries</Typography>
+                                {Object.entries(results.results).map(([slug, result]) => (
+                                    <Accordion key={slug}>
+                                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                            {result.status === 'success' && <CheckCircleIcon color="success" sx={{ mr: 1 }}/>}
+                                            {result.status === 'failed' && <ErrorIcon color="error" sx={{ mr: 1 }}/>}
+                                            {result.status === 'pending' && <CircularProgress size={20} sx={{ mr: 1 }}/>}
+                                            <Typography sx={{ fontWeight: 'bold' }}>{getCandidateName(slug)}</Typography>
+                                            <Typography sx={{ ml: 1, color: 'text.secondary' }}>- {result.status}</Typography>
+                                        </AccordionSummary>
+                                        <AccordionDetails>
+                                            {result.status === 'success' && <Box dangerouslySetInnerHTML={{ __html: result.summary }} />}
+                                            {result.status === 'failed' && <Alert severity="error">{result.error}</Alert>}
+                                        </AccordionDetails>
+                                    </Accordion>
+                                ))}
+                            </Box>
+                        )}
+                    </CardContent>
+                </Card>
             </Grid>
-        </Box>
+        </Grid>
     );
 };
 

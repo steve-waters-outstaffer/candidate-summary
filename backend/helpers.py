@@ -113,6 +113,48 @@ def fetch_hiring_pipeline():
         logging.error(f"Error fetching hiring pipeline: {e}")
         return []
 
+def get_recruitcrm_headers():
+    """Returns the authorization headers for RecruitCRM API calls."""
+    return {
+        'Authorization': f'Bearer {os.getenv("RECRUITCRM_API_KEY")}',
+        'Accept': 'application/json'
+    }
+
+def push_to_recruitcrm_internal(candidate_slug, html_summary):
+    """Internal function to push summary, returns success status."""
+    logging.info(f"\n--- Calling push_to_recruitcrm_internal for {candidate_slug} ---")
+    try:
+        url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
+        files = {'candidate_summary': (None, html_summary)}
+        response = requests.post(url, files=files, headers=get_recruitcrm_headers())
+        if response.status_code == 200:
+            logging.info(f"Successfully pushed summary for {candidate_slug}")
+            return True
+        else:
+            logging.error(f"Failed to push summary for {candidate_slug}: {response.text}")
+            return False
+    except Exception as e:
+        logging.error(f"Exception in push_to_recruitcrm_internal for {candidate_slug}: {e}")
+        return False
+
+def fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug):
+    """Fetches job-specific custom fields for a candidate from RecruitCRM."""
+    if not RECRUITCRM_API_KEY:
+        logging.error("RecruitCRM API key is not set.")
+        return None
+    url = f"https://api.recruitcrm.io/v1/candidates/associated-field/{candidate_slug}/{job_slug}"
+    try:
+        response = requests.get(url, headers=get_recruitcrm_headers())
+        if response.status_code == 200:
+            logging.info(f"Successfully fetched job-specific fields for candidate {candidate_slug} and job {job_slug}")
+            return response.json().get('data', {})
+        else:
+            logging.error(f"Failed to fetch job-specific fields for candidate {candidate_slug} and job {job_slug}: {response.text}")
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"An error occurred while fetching job-specific fields: {e}")
+        return None
+
 def fetch_recruitcrm_assigned_candidates(job_slug, status_id=None):
     """Fetches assigned candidates for a job from RecruitCRM."""
     url = f"https://api.recruitcrm.io/v1/jobs/{job_slug}/assigned-candidates"
