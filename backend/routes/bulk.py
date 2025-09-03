@@ -76,18 +76,14 @@ def process_candidates_background(job_id, app_context):
                     has_ai_interview = False
                     interview_data = None
                     if alpharun_job_id:
-                        current_app.logger.info(f"Found AI Job ID: {alpharun_job_id}. Searching for candidate's interview.")
-                        interview_id = fetch_candidate_interview_id(slug)
+                        interview_id = fetch_candidate_interview_id(slug, job_slug)
                         if interview_id:
-                            current_app.logger.info(f"Found Interview ID: {interview_id}. Fetching interview data.")
                             interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                             if interview_data:
                                 current_app.logger.info(f"Successfully fetched AI interview data for candidate {slug}.")
                                 has_ai_interview = True
                             else:
                                 current_app.logger.warning(f"Failed to fetch AI interview data for candidate {slug}.")
-                        else:
-                            current_app.logger.info(f"No AI interview ID found for candidate {slug}.")
                     else:
                         current_app.logger.info("No AI Job ID found for this job, skipping interview search.")
 
@@ -121,11 +117,6 @@ def process_candidates_background(job_id, app_context):
             current_app.logger.error(f"A fatal error occurred in background job {job_id}: {e}")
             job_details['status'] = 'failed'
             job_details['error'] = str(e)
-
-
-# In backend/routes/bulk.py
-
-# In backend/routes/bulk.py
 
 @bulk_bp.route('/job-stages-with-counts/<job_slug>', methods=['GET'])
 def get_job_stages_with_counts(job_slug):

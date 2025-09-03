@@ -153,6 +153,8 @@ def test_resume():
             return jsonify({'success': False, 'message': 'No resume on file for this candidate.'})
     return jsonify({'error': 'Failed to fetch candidate data to check for resume'}), 404
 
+# In backend/routes/single.py
+
 @single_bp.route('/generate-summary', methods=['POST'])
 def generate_summary():
     """Generate candidate summary, optionally including Fireflies and interview data."""
@@ -161,31 +163,47 @@ def generate_summary():
         data = request.get_json()
         candidate_slug = data.get('candidate_slug')
         job_slug = data.get('job_slug')
-        alpharun_job_id = data.get('alpharun_job_id')
-        raw_interview_id = data.get('interview_id')
         fireflies_url = data.get('fireflies_url')
         additional_context = data.get('additional_context', '')
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
         model = current_app.model
 
-        interview_id = raw_interview_id.split('?')[0] if raw_interview_id else None
-
         if not all([candidate_slug, job_slug]):
             return jsonify({'error': 'Missing required RecruitCRM fields'}), 400
 
         candidate_data = fetch_recruitcrm_candidate(candidate_slug)
-        job_data = fetch_recruitcrm_job(job_slug)
+        job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True) # Ensure custom fields are included
 
+        if not candidate_data or not job_data:
+            missing = [name for name, d in [("candidate", candidate_data), ("job", job_data)] if not d]
+            return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}'}), 500
+
+        # Combine candidate's general custom fields with job-specific ones
         job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug)
         if candidate_data and job_specific_fields:
-            if 'data' in candidate_data and 'custom_fields' in candidate_data['data']:
-                candidate_data['data']['custom_fields'].extend(job_specific_fields)
+            candidate_details = candidate_data.get('data', candidate_data)
+            if 'custom_fields' in candidate_details:
+                candidate_details['custom_fields'].extend(job_specific_fields.values())
             else:
-                candidate_data.setdefault('data', {})['custom_fields'] = job_specific_fields
+                candidate_details['custom_fields'] = list(job_specific_fields.values())
 
+        # --- AI INTERVIEW LOGIC ---
         interview_data = None
-        if alpharun_job_id and interview_id:
-            interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+        alpharun_job_id = None
+
+        # 1. Get Alpharun Job ID from the job's custom fields
+        job_details = job_data.get('data', job_data)
+        for field in job_details.get('custom_fields', []):
+            if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
+                alpharun_job_id = field.get('value')
+                break
+
+        # 2. If we have an Alpharun Job ID, fetch the interview using the new fallback logic
+        if alpharun_job_id:
+            interview_id = fetch_candidate_interview_id(candidate_slug, job_slug)
+            if interview_id:
+                interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+        # --- END AI INTERVIEW LOGIC ---
 
         gemini_resume_file = None
         if candidate_data:
@@ -201,10 +219,6 @@ def generate_summary():
                 raw_transcript = fetch_fireflies_transcript(transcript_id)
                 if raw_transcript:
                     fireflies_data = normalise_fireflies_transcript(raw_transcript)
-
-        if not all([candidate_data, job_data]):
-            missing = [name for name, d in [("candidate", candidate_data), ("job", job_data)] if not d]
-            return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}'}), 500
 
         html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, model)
 

@@ -86,19 +86,57 @@ def fetch_recruitcrm_candidate(slug):
         return None
 
 
-def fetch_candidate_interview_id(slug):
-    """Fetches a candidate's AI Interview ID from RecruitCRM."""
-    candidate_data = fetch_recruitcrm_candidate(slug)
-    if not candidate_data:
-        return None
+# In backend/helpers.py
 
-    candidate_details = candidate_data.get('data', candidate_data)
-    for field in candidate_details.get('custom_fields', []):
-        if isinstance(field, dict) and field.get('field_name') == 'AI Interview ID':
-            value = field.get('value')
-            if value:
-                return value.split('?')[0]
-            break
+def fetch_candidate_interview_id(candidate_slug, job_slug=None):
+    """
+    Fetches the AI Interview ID for a candidate.
+    It first checks the job-specific associated fields, which is the new primary location.
+    If not found, it falls back to checking the general custom fields on the candidate's record.
+    """
+    # 1. New Method: Check job-associated fields first
+    if job_slug:
+        current_app.logger.info(f"--- Starting AI Interview ID search for cand: {candidate_slug}, job: {job_slug} ---")
+        job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug)
+
+        if job_specific_fields:
+            current_app.logger.info(f"  [1] Checking NEW location (Job-Associated Fields)...")
+            current_app.logger.info(f"  [1a] Fields returned from API: {job_specific_fields}")
+            for field_key, field_data in job_specific_fields.items():
+                # Check if the field is a dictionary and has a 'label'
+                if isinstance(field_data, dict) and 'label' in field_data:
+                    current_app.logger.info(f"    - Checking field -> Label: '{field_data.get('label')}', Value: '{field_data.get('value')}'")
+                    if field_data.get('label') == 'AI Interview ID':
+                        interview_id = field_data.get('value')
+                        if interview_id:
+                            current_app.logger.info(f"  [SUCCESS] Found AI Interview ID '{interview_id}' in new location.")
+                            return interview_id
+            current_app.logger.info("  [1b] Did not find a matching 'AI Interview ID' label with a value.")
+        else:
+            current_app.logger.info("  [1] No job-associated fields were returned from the API for this candidate/job.")
+
+    # 2. Fallback Method: Check the main custom fields on the candidate record
+    current_app.logger.info("  [2] Checking FALLBACK location (Candidate Custom Fields)...")
+    candidate_data = fetch_recruitcrm_candidate(candidate_slug)
+    if candidate_data:
+        candidate_details = candidate_data.get('data', candidate_data)
+        custom_fields = candidate_details.get('custom_fields', [])
+        current_app.logger.info(f"  [2a] Fields returned from API: {custom_fields}")
+        for field in custom_fields:
+            if isinstance(field, dict) and 'field_name' in field:
+                current_app.logger.info(f"    - Checking field -> Name: '{field.get('field_name')}', Value: '{field.get('value')}'")
+                if field.get('field_name') == 'AI Interview ID':
+                    interview_id = field.get('value')
+                    if interview_id:
+                        current_app.logger.info(f"  [SUCCESS] Found AI Interview ID '{interview_id}' in fallback location.")
+                        return interview_id
+        current_app.logger.info("  [2b] Did not find a matching 'AI Interview ID' field name with a value.")
+    else:
+        current_app.logger.warning("  [2] Could not fetch candidate data for fallback check.")
+
+
+    # 3. If not found in either location
+    current_app.logger.info(f"--- No AI Interview ID found for candidate {candidate_slug}. Returning None. ---")
     return None
 
 def fetch_recruitcrm_job(slug, include_custom_fields=True):
