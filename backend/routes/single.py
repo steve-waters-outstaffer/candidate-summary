@@ -110,9 +110,12 @@ def test_fireflies():
     """Tests the connection to the Fireflies API and returns the meeting title."""
     current_app.logger.info("\n--- Endpoint Hit: /api/test-fireflies ---")
     data = request.get_json()
-    transcript_url = data.get('transcript_url')
+
+    # Check for both 'fireflies_url' and 'transcript_url' to handle inconsistency
+    transcript_url = data.get('fireflies_url') or data.get('transcript_url')
+
     if not transcript_url:
-        return jsonify({'error': 'Missing transcript_url'}), 400
+        return jsonify({'error': 'Missing fireflies_url or transcript_url'}), 400
 
     transcript_id = extract_fireflies_transcript_id(transcript_url)
     if not transcript_id:

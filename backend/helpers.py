@@ -1,6 +1,8 @@
 import os
 import logging
 import requests
+import re
+from urllib.parse import urlparse
 from re import sub, MULTILINE
 import mimetypes
 import tempfile
@@ -13,6 +15,29 @@ from file_converter import convert_to_supported_format, UnsupportedFileTypeError
 RECRUITCRM_API_KEY = os.getenv('RECRUITCRM_API_KEY')
 ALPHARUN_API_KEY = os.getenv('ALPHARUN_API_KEY')
 FIREFLIES_API_KEY = os.getenv('FIREFLIES_API_KEY')
+
+# --- Constants  ---
+GRAPHQL_URL = "https://api.fireflies.ai/graphql"
+TRANSCRIPT_QUERY = """
+query Transcript($id: String!) {
+  transcript(id: $id) {
+    id
+    title
+    date
+    duration
+    transcript_url
+    speakers { id name }
+    sentences {
+      index
+      speaker_name
+      start_time
+      end_time
+      text
+      raw_text
+    }
+  }
+}
+"""
 
 # ==============================================================================
 # 1. AUTHENTICATION HELPERS
@@ -164,7 +189,7 @@ def fetch_recruitcrm_assigned_candidates(job_slug, status_id=None):
         response.raise_for_status()
         return response.json().get('data', [])
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching assigned candidates for job {job_slug}: {e}")
+        logging.error(f"Error fetching assigned candidatez for job {job_slug}: {e}")
         return []
 
 def fetch_alpharun_interview(job_opening_id, interview_id):
@@ -179,25 +204,78 @@ def fetch_alpharun_interview(job_opening_id, interview_id):
         logging.error(f"Error fetching AlphaRun interview {interview_id}: {e}")
         return None
 
-def extract_fireflies_transcript_id(url):
-    """Extracts the transcript ID from a Fireflies.ai meeting URL."""
-    try:
-        path_segments = urlparse(url).path.split('/')
-        if 'transcript' in path_segments:
-            return path_segments[path_segments.index('transcript') + 1]
-    except (ValueError, IndexError) as e:
-        logging.error(f"Could not extract transcript ID from URL {url}: {e}")
+# This pattern is crucial for validating the ID.
+ULID_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+def extract_fireflies_transcript_id(s: str) -> str | None:
+    """
+    Parses a string to find a Fireflies transcript ID.
+
+    Args:
+        s: The input string, which can be a full URL or a standalone ID.
+
+    Returns:
+        The extracted 26-character ID, or None if not found.
+    """
+    if not s:
+        return None
+
+    s = s.strip()
+    # If user pasted a full URL, parse ".../view/<slug>::<ID>"
+    if s.startswith("http://") or s.startswith("https://"):
+        try:
+            path_segment = urlparse(s).path.rsplit("/", 1)[-1]
+            parts = path_segment.split("::")
+            if len(parts) == 2 and ULID_PATTERN.fullmatch(parts[1]):
+                return parts[1]
+        except (IndexError, ValueError):
+            return None
+        return None
+    # If they pasted just the ID
+    if ULID_PATTERN.fullmatch(s):
+        return s
     return None
 
-def fetch_fireflies_transcript(transcript_id):
-    """Fetches a transcript from Fireflies.ai using its ID."""
-    url = f"https://api.fireflies.ai/v1/transcript/{transcript_id}"
+
+def fetch_fireflies_transcript(transcript_id: str) -> dict | None:
+    """
+    Fetches a transcript from Fireflies.ai using GraphQL.
+    """
+    api_key = os.getenv('FIREFLIES_API_KEY')
+    if not api_key:
+        logging.error("FIREFLIES_API_KEY environment variable not set.")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "query": TRANSCRIPT_QUERY,
+        "variables": {"id": transcript_id}
+    }
+
     try:
-        response = requests.get(url, headers=get_fireflies_headers())
-        response.raise_for_status()
-        return response.json()
+        resp = requests.post(
+            GRAPHQL_URL,
+            json=payload,
+            headers=headers,
+            timeout=30
+        )
+        resp.raise_for_status()
+        response_data = resp.json()
+
+        if "errors" in response_data:
+            logging.error(f"GraphQL error fetching Fireflies transcript {transcript_id}: {response_data['errors']}")
+            return None
+
+        return response_data.get("data", {}).get("transcript")
+
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching Fireflies transcript {transcript_id}: {e}")
+        logging.error(f"Request error fetching Fireflies transcript {transcript_id}: {e}")
+        return None
+    except json.JSONDecodeError:
+        logging.error(f"JSON decode error fetching Fireflies transcript {transcript_id}.")
         return None
 
 # ==============================================================================
