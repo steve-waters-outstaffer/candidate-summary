@@ -8,10 +8,14 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
+import DescriptionIcon from '@mui/icons-material/Description';
+import MicIcon from '@mui/icons-material/Mic';
 import { debounce } from 'lodash';
 
 const BulkGenerator = () => {
     const [jobUrl, setJobUrl] = useState('');
+    const [clientName, setClientName] = useState('');
+    const [outstafferJobUrl, setOutstafferJobUrl] = useState('');
     const [jobStages, setJobStages] = useState([]);
     const [selectedStage, setSelectedStage] = useState('');
     const [singleCandidatePrompt, setSingleCandidatePrompt] = useState('');
@@ -29,6 +33,7 @@ const BulkGenerator = () => {
     const [candidateList, setCandidateList] = useState([]);
     const [selectedCandidates, setSelectedCandidates] = useState({});
     const [jobId, setJobId] = useState(null);
+    const [jobName, setJobName] = useState('');
     const [results, setResults] = useState(null);
 
 
@@ -66,6 +71,7 @@ const BulkGenerator = () => {
         setCandidateList([]);
         setSelectedCandidates({});
         setJobId(null);
+        setJobName('');
         setResults(null);
     };
 
@@ -81,16 +87,21 @@ const BulkGenerator = () => {
         try {
             const response = await fetch(`${API_BASE_URL}/api/job-stages-with-counts/${jobSlug}`);
             if (response.ok) {
-                const stages = await response.json();
-                setJobStages(stages);
-                if (stages.length === 0) {
+                const data = await response.json();
+                setJobName(data.job_name || '');
+                setJobStages(data.stages || []);
+                if (!data.stages || data.stages.length === 0) {
                     showAlert('info', 'No candidates found in any active stage for this job.');
                 }
             } else {
-                showAlert('error', 'Could not fetch candidate stages for this job.');
+                const errorData = await response.json();
+                showAlert('error', errorData.error || 'Could not fetch candidate stages for this job.');
+                setJobName('');
             }
         } catch (error) {
             console.error('Error fetching job stages:', error);
+            showAlert('error', 'A network error occurred while fetching job stages.');
+            setJobName('');
         } finally {
             setStagesLoading(false);
         }
@@ -184,10 +195,17 @@ const BulkGenerator = () => {
 
                 if (response.ok) {
                     setResults(data);
-                    if (data.status === 'complete') {
+                    if (data.job_name && !jobName) {
+                        setJobName(data.job_name);
+                    }
+                    if (data.status === 'complete' || data.status === 'failed') {
                         clearInterval(interval);
                         setProcessingLoading(false);
-                        showAlert('success', 'All summaries have been processed!');
+                        if (data.status === 'complete') {
+                            showAlert('success', 'All summaries have been processed!');
+                        } else {
+                            showAlert('error', data.error || 'The bulk processing job failed.');
+                        }
                     }
                 } else {
                     clearInterval(interval);
@@ -216,7 +234,9 @@ const BulkGenerator = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     job_id: jobId,
-                    multi_candidate_prompt: multiCandidatePrompt
+                    multi_candidate_prompt: multiCandidatePrompt,
+                    client_name: clientName,
+                    outstaffer_job_url: outstafferJobUrl
                 })
             });
 
@@ -232,6 +252,15 @@ const BulkGenerator = () => {
         } finally {
             setEmailLoading(false);
         }
+    };
+
+    // --- Step 5: Send to RecruitCRM ---
+    const handleSendToRecruitCRM = async (candidateSlug) => {
+        showAlert('info', `Sending ${getCandidateName(candidateSlug)} to RecruitCRM...`);
+    };
+
+    const handleSendAllToRecruitCRM = async () => {
+        showAlert('info', 'Sending all successful summaries to RecruitCRM...');
     };
 
 
@@ -253,6 +282,12 @@ const BulkGenerator = () => {
 
                         <TextField label="RecruitCRM Job URL" value={jobUrl} onChange={handleJobUrlChange} fullWidth sx={{ mb: 2 }} placeholder="Paste a job URL to begin..." disabled={processingLoading} />
 
+                        {jobName && (
+                            <Typography variant="h6" sx={{ color: 'success.main', mb: 2, fontWeight: 'medium' }}>
+                                Job: {jobName}
+                            </Typography>
+                        )}
+
                         <FormControl fullWidth sx={{ mb: 2 }}>
                             <InputLabel id="stage-label">Hiring Stage</InputLabel>
                             <Select labelId="stage-label" value={selectedStage} onChange={(e) => handleStageChange(e.target.value)} label="Hiring Stage" disabled={stagesLoading || jobStages.length === 0 || processingLoading}
@@ -264,19 +299,32 @@ const BulkGenerator = () => {
                                 ))}
                             </Select>
                         </FormControl>
+
                         {candidatesLoading && <CircularProgress />}
+
                         {candidateList.length > 0 && (
-                            <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto', mb: 2 }}>
-                                <List dense>
-                                    {candidateList.map((cand) => (
-                                        <ListItem key={cand.slug} secondaryAction={<Switch edge="end" checked={selectedCandidates[cand.slug] || false} onChange={() => handleCandidateToggle(cand.slug)} disabled={processingLoading}/>} disablePadding>
-                                            <ListItemText primary={cand.name} sx={{ pl: 2 }}/>
-                                        </ListItem>
-                                    ))}
-                                </List>
-                            </Paper>
+                            <>
+                                <Typography variant="subtitle1" sx={{mb: 1}}>Candidates to process</Typography>
+                                <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto', mb: 2 }}>
+                                    <List dense>
+                                        {candidateList.map((cand) => (
+                                            <ListItem key={cand.slug} secondaryAction={<Switch edge="end" checked={selectedCandidates[cand.slug] || false} onChange={() => handleCandidateToggle(cand.slug)} disabled={processingLoading}/>} disablePadding>
+                                                <ListItemText primary={cand.name} sx={{ pl: 2 }}/>
+                                            </ListItem>
+                                        ))}
+                                    </List>
+                                </Paper>
+                            </>
                         )}
 
+                        <Divider sx={{ my: 2 }} />
+                        <Typography variant="subtitle1" sx={{mb: 1, fontWeight: 'bold'}}>Email Customization</Typography>
+                        <TextField label="Client Name" value={clientName} onChange={(e) => setClientName(e.target.value)} fullWidth sx={{ mb: 2 }} disabled={processingLoading} />
+                        <TextField label="Outstaffer Platform Job URL" value={outstafferJobUrl} onChange={(e) => setOutstafferJobUrl(e.target.value)} fullWidth sx={{ mb: 2 }} disabled={processingLoading} />
+
+
+                        <Divider sx={{ my: 2 }} />
+                        <Typography variant="subtitle1" sx={{mb: 1, fontWeight: 'bold'}}>Prompt Selection</Typography>
                         <FormControl fullWidth sx={{ mb: 2 }}>
                             <InputLabel>Individual Summary Prompt</InputLabel>
                             <Select value={singleCandidatePrompt} onChange={(e) => setSingleCandidatePrompt(e.target.value)} label="Individual Summary Prompt" disabled={processingLoading}>
@@ -307,17 +355,25 @@ const BulkGenerator = () => {
 
                         {!results && !processingLoading && <Typography color="text.secondary">Results will appear here once processing starts.</Typography>}
 
+                        {processingLoading && !results && <CircularProgress />}
+
                         {results && (
                             <Box>
-                                <Typography variant="h6" gutterBottom>
-                                    Job Status: {results.status} ({results.processed_count + results.failed_count} / {results.total_candidates} complete)
-                                </Typography>
+                                {jobName && <Typography variant="h6" gutterBottom>Job: <span style={{ color: 'green' }}>{jobName}</span></Typography>}
+                                <Typography variant="h6" gutterBottom>Status: {results.status} ({results.processed_count + results.failed_count} / {results.total_candidates} complete)</Typography>
                                 <Divider sx={{ my: 2 }} />
 
-                                {results.status === 'complete' && !results.email_html && (
-                                    <Button variant="contained" color="secondary" onClick={handleGenerateEmail} disabled={emailLoading} fullWidth sx={{ mb: 2 }}>
-                                        {emailLoading ? <CircularProgress size={24} /> : 'Generate Final Email'}
-                                    </Button>
+                                {results.status === 'complete' && (
+                                    <Box sx={{display: 'flex', gap: 2, mb: 2}}>
+                                        {!results.email_html && (
+                                            <Button variant="contained" color="secondary" onClick={handleGenerateEmail} disabled={emailLoading} fullWidth>
+                                                {emailLoading ? <CircularProgress size={24} /> : 'Generate Final Email'}
+                                            </Button>
+                                        )}
+                                        <Button variant="outlined" color="success" onClick={handleSendAllToRecruitCRM} fullWidth>
+                                            Send All to RecruitCRM
+                                        </Button>
+                                    </Box>
                                 )}
 
                                 {results.email_html && (
@@ -333,18 +389,33 @@ const BulkGenerator = () => {
                                     </Accordion>
                                 )}
 
+                                <Divider sx={{ my: 2 }} />
                                 <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Individual Summaries</Typography>
                                 {Object.entries(results.results).map(([slug, result]) => (
                                     <Accordion key={slug}>
                                         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                            {result.status === 'success' && <CheckCircleIcon color="success" sx={{ mr: 1 }}/>}
-                                            {result.status === 'failed' && <ErrorIcon color="error" sx={{ mr: 1 }}/>}
-                                            {result.status === 'pending' && <CircularProgress size={20} sx={{ mr: 1 }}/>}
-                                            <Typography sx={{ fontWeight: 'bold' }}>{getCandidateName(slug)}</Typography>
-                                            <Typography sx={{ ml: 1, color: 'text.secondary' }}>- {result.status}</Typography>
+                                            <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                                                {result.status === 'success' && <CheckCircleIcon color="success" sx={{ mr: 1 }}/>}
+                                                {result.status === 'failed' && <ErrorIcon color="error" sx={{ mr: 1 }}/>}
+                                                {result.status === 'pending' && <CircularProgress size={20} sx={{ mr: 1 }}/>}
+                                                <Typography sx={{ fontWeight: 'bold', flexShrink: 0 }}>{getCandidateName(slug)}</Typography>
+                                                <Typography sx={{ ml: 1, color: 'text.secondary' }}>- {result.status}</Typography>
+                                                <Box sx={{ flexGrow: 1 }} />
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2, flexShrink: 0 }}>
+                                                    {result.has_cv && <DescriptionIcon color="action" titleAccess="CV Found"/>}
+                                                    {result.has_ai_interview && <MicIcon color="action" titleAccess="AI Interview Found" />}
+                                                </Box>
+                                            </Box>
                                         </AccordionSummary>
                                         <AccordionDetails>
-                                            {result.status === 'success' && <Box dangerouslySetInnerHTML={{ __html: result.summary }} />}
+                                            {result.status === 'success' && (
+                                                <Box>
+                                                    <Box dangerouslySetInnerHTML={{ __html: result.summary }} />
+                                                    <Button variant="outlined" color="primary" size="small" onClick={() => handleSendToRecruitCRM(slug)} sx={{ mt: 2 }}>
+                                                        Send to RecruitCRM
+                                                    </Button>
+                                                </Box>
+                                            )}
                                             {result.status === 'failed' && <Alert severity="error">{result.error}</Alert>}
                                         </AccordionDetails>
                                     </Accordion>

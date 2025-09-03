@@ -66,26 +66,52 @@ def process_candidates_background(job_id, app_context):
                         else:
                             candidate_details_data['custom_fields'] = list(job_specific_fields.values())
 
+                    has_cv = False
                     gemini_resume_file = None
                     if candidate_details_data.get('resume'):
                         gemini_resume_file = upload_resume_to_gemini(candidate_details_data.get('resume'))
+                        has_cv = True if gemini_resume_file else False
 
+
+                    has_ai_interview = False
                     interview_data = None
                     if alpharun_job_id:
+                        current_app.logger.info(f"Found AI Job ID: {alpharun_job_id}. Searching for candidate's interview.")
                         interview_id = fetch_candidate_interview_id(slug)
                         if interview_id:
+                            current_app.logger.info(f"Found Interview ID: {interview_id}. Fetching interview data.")
                             interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+                            if interview_data:
+                                current_app.logger.info(f"Successfully fetched AI interview data for candidate {slug}.")
+                                has_ai_interview = True
+                            else:
+                                current_app.logger.warning(f"Failed to fetch AI interview data for candidate {slug}.")
+                        else:
+                            current_app.logger.info(f"No AI interview ID found for candidate {slug}.")
+                    else:
+                        current_app.logger.info("No AI Job ID found for this job, skipping interview search.")
+
 
                     summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, model)
 
                     if summary:
-                        BULK_JOBS[job_id]['results'][slug] = {'status': 'success', 'summary': summary}
+                        BULK_JOBS[job_id]['results'][slug] = {
+                            'status': 'success',
+                            'summary': summary,
+                            'has_cv': has_cv,
+                            'has_ai_interview': has_ai_interview
+                        }
                     else:
                         raise Exception("AI failed to generate summary.")
 
                 except Exception as e:
                     current_app.logger.error(f"Error processing candidate {slug} for job {job_id}: {e}")
-                    BULK_JOBS[job_id]['results'][slug] = {'status': 'failed', 'error': str(e)}
+                    BULK_JOBS[job_id]['results'][slug] = {
+                        'status': 'failed',
+                        'error': str(e),
+                        'has_cv': False,
+                        'has_ai_interview': False
+                    }
 
                 job_details['processed_count'] += 1
 
@@ -97,14 +123,34 @@ def process_candidates_background(job_id, app_context):
             job_details['error'] = str(e)
 
 
+# In backend/routes/bulk.py
+
+# In backend/routes/bulk.py
+
 @bulk_bp.route('/job-stages-with-counts/<job_slug>', methods=['GET'])
 def get_job_stages_with_counts(job_slug):
-    """Fetches all candidates for a job, counts them by stage, and returns a list of stages that have at least one candidate."""
+    """Fetches job name, and all candidates for a job, counts them by stage, and returns a list of stages that have at least one candidate."""
     current_app.logger.info(f"\n--- Endpoint Hit: /api/job-stages-with-counts/{job_slug} ---")
+
+    # Attempt to fetch the job details first.
+    job_data = fetch_recruitcrm_job(job_slug)
+
+    # Check if the job data is valid and extract the name from the root object.
+    if job_data and job_data.get('name'):
+        job_name = job_data.get('name')
+    else:
+        # If we can't get job details with a name, it's a critical failure.
+        current_app.logger.error(f"Failed to fetch valid job data for slug: {job_slug}. Response: {job_data}")
+        return jsonify({'error': 'Job not found or has no name.'}), 404
+
+    # Now, fetch candidates.
     all_candidates = fetch_recruitcrm_assigned_candidates(job_slug)
     if not all_candidates:
-        return jsonify({'error': 'No candidates found for this job or job not found.'}), 404
+        # A job can exist with no candidates.
+        current_app.logger.info(f"Job '{job_name}' found, but no candidates are assigned to it.")
+        return jsonify({'job_name': job_name, 'stages': []}), 200
 
+    # If we have candidates, proceed to count them by stage.
     stage_counts = defaultdict(int)
     for candidate_data in all_candidates:
         status_id = candidate_data.get('status', {}).get('status_id')
@@ -122,7 +168,7 @@ def get_job_stages_with_counts(job_slug):
             stage['candidate_count'] = count
             stages_with_counts.append(stage)
 
-    return jsonify(stages_with_counts), 200
+    return jsonify({'job_name': job_name, 'stages': stages_with_counts}), 200
 
 @bulk_bp.route('/candidates-in-stage/<job_slug>/<stage_id>', methods=['GET'])
 def get_candidates_in_stage(job_slug, stage_id):
@@ -159,14 +205,22 @@ def start_bulk_process_job():
     job_id = str(uuid.uuid4())
     job_slug = job_url.split('/')[-1]
 
+    # Fetch job name right away to provide immediate feedback
+    job_data = fetch_recruitcrm_job(job_slug)
+    job_name = "Unknown Job"
+    if job_data and 'data' in job_data:
+        job_name = job_data['data'].get('name', 'Unknown Job')
+
+
     BULK_JOBS[job_id] = {
         'status': 'processing',
         'job_slug': job_slug,
+        'job_name': job_name,
         'single_prompt': single_prompt,
         'candidate_slugs': candidate_slugs,
         'total_candidates': len(candidate_slugs),
         'processed_count': 0,
-        'results': {slug: {'status': 'pending'} for slug in candidate_slugs},
+        'results': {slug: {'status': 'pending', 'has_cv': False, 'has_ai_interview': False} for slug in candidate_slugs},
         'email_html': None,
         'error': None
     }
@@ -185,6 +239,7 @@ def get_bulk_job_status(job_id):
         return jsonify({'error': 'Job not found'}), 404
 
     response_data = {
+        'job_name': job.get('job_name'),
         'status': job['status'],
         'total_candidates': job['total_candidates'],
         'processed_count': len([r for r in job['results'].values() if r['status'] != 'pending']),
@@ -202,6 +257,9 @@ def generate_bulk_email():
     data = request.get_json()
     job_id = data.get('job_id')
     multi_prompt = data.get('multi_candidate_prompt')
+    client_name = data.get('client_name')
+    outstaffer_job_url = data.get('outstaffer_job_url')
+
 
     if not all([job_id, multi_prompt]):
         return jsonify({'error': 'Missing job_id or multi_candidate_prompt'}), 400
@@ -215,7 +273,6 @@ def generate_bulk_email():
         job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True)
         job_details = job_data.get('data', {}) if job_data else {}
 
-        # We need the candidate names for the prompt
         all_candidates_in_job = fetch_recruitcrm_assigned_candidates(job_slug)
         candidate_name_map = {
             c.get('candidate', {}).get('slug'): f"{c.get('candidate', {}).get('first_name', '')} {c.get('candidate', {}).get('last_name', '')}".strip()
@@ -235,8 +292,8 @@ def generate_bulk_email():
         candidate_names_str = "\n".join(successful_summaries.keys())
 
         prompt_kwargs = {
-            'client_name': data.get('client_name', job_details.get('company', {}).get('name', 'Valued Client')),
-            'job_url': data.get('outstaffer_platform_url'),
+            'client_name': client_name or job_details.get('company', {}).get('name', 'Valued Client'),
+            'job_url': outstaffer_job_url,
             'job_title': job_details.get('name', ''),
             'job_data': job_details,
             'processed_summaries': summaries_as_string,
@@ -250,7 +307,7 @@ def generate_bulk_email():
 
         if response and response.text:
             cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
-            link_url = data.get('outstaffer_platform_url') or f"https://app.recruitcrm.io/jobs/{job_slug}"
+            link_url = outstaffer_job_url or f"https://app.recruitcrm.io/jobs/{job_slug}"
             email_html = cleaned_content.replace('[HERE_LINK]', f'<a href="{link_url}">here</a>')
 
             BULK_JOBS[job_id]['email_html'] = email_html
