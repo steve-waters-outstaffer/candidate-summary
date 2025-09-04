@@ -4,28 +4,51 @@ import datetime
 import re
 from flask import Blueprint, request, jsonify, current_app
 import structlog
-from config.prompts import get_available_prompts
 import requests
-from helpers.recruitcrm_helpers import (
-    fetch_recruitcrm_candidate,
-    fetch_recruitcrm_job,
-    fetch_alpharun_interview,
-    get_recruitcrm_headers,
-    fetch_recruitcrm_candidate_job_specific_fields,
-    fetch_candidate_interview_id
-)
-from helpers.fireflies_helpers import (
-    extract_fireflies_transcript_id,
-    fetch_fireflies_transcript,
-    normalise_fireflies_transcript
-)
-from helpers.ai_helpers import (
-    upload_resume_to_gemini,
-    generate_html_summary
-)
 
-
+# --- Start Debugging Imports ---
 log = structlog.get_logger()
+log.info("routes.single: Top of file, starting imports.")
+
+try:
+    log.info("routes.single: Importing from config.prompts...")
+    from config.prompts import get_available_prompts
+    log.info("routes.single: Successfully imported from config.prompts.")
+
+    log.info("routes.single: Importing from helpers.recruitcrm_helpers...")
+    from helpers.recruitcrm_helpers import (
+        fetch_recruitcrm_candidate,
+        fetch_recruitcrm_job,
+        fetch_alpharun_interview,
+        get_recruitcrm_headers,
+        fetch_recruitcrm_candidate_job_specific_fields,
+        fetch_candidate_interview_id
+    )
+    log.info("routes.single: Successfully imported from helpers.recruitcrm_helpers.")
+
+    log.info("routes.single: Importing from helpers.fireflies_helpers...")
+    from helpers.fireflies_helpers import (
+        extract_fireflies_transcript_id,
+        fetch_fireflies_transcript,
+        normalise_fireflies_transcript
+    )
+    log.info("routes.single: Successfully imported from helpers.fireflies_helpers.")
+
+    log.info("routes.single: Importing from helpers.ai_helpers...")
+    from helpers.ai_helpers import (
+        upload_resume_to_gemini,
+        generate_html_summary
+    )
+    log.info("routes.single: Successfully imported from helpers.ai_helpers.")
+
+except Exception as e:
+    log.error("routes.single: FAILED during import", error=str(e), exc_info=True)
+    import sys
+    sys.exit(1)
+
+log.info("routes.single: All imports successful.")
+# --- End Debugging Imports ---
+
 
 single_bp = Blueprint('single_api', __name__)
 
@@ -183,8 +206,6 @@ def test_resume():
         else:
             return jsonify({'success': False, 'message': 'No resume on file for this candidate.'})
     return jsonify({'error': 'Failed to fetch candidate data to check for resume'}), 404
-
-# In backend/routes/single.py
 
 @single_bp.route('/generate-summary', methods=['POST'])
 def generate_summary():

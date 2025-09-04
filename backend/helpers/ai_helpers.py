@@ -1,26 +1,54 @@
 # helpers/ai_helpers.py
-import os
-import io
-import tempfile
-from re import sub, MULTILINE
-import requests
 import structlog
-import google.generativeai as genai
-from config.prompts import build_full_prompt
 
+# --- Start Debugging Imports ---
 log = structlog.get_logger()
+log.info("helpers.ai_helpers: Top of file, starting imports.")
 
-# --- Safely import file conversion dependencies ---
 try:
-    import magic
-except ImportError:
-    log.error("The 'python-magic' library is not installed or its dependency 'libmagic' is missing.")
-    magic = None
-try:
-    import docx
-except ImportError:
-    log.error("The 'python-docx' library is not installed.")
-    docx = None
+    log.info("helpers.ai_helpers: Importing os...")
+    import os
+    log.info("helpers.ai_helpers: Importing io...")
+    import io
+    log.info("helpers.ai_helpers: Importing tempfile...")
+    import tempfile
+    log.info("helpers.ai_helpers: Importing re...")
+    from re import sub, MULTILINE
+    log.info("helpers.ai_helpers: Importing requests...")
+    import requests
+
+    log.info("helpers.ai_helpers: Importing google.generativeai...")
+    import google.generativeai as genai
+    log.info("helpers.ai_helpers: Successfully imported google.generativeai.")
+
+    log.info("helpers.ai_helpers: Importing from config.prompts...")
+    from config.prompts import build_full_prompt
+    log.info("helpers.ai_helpers: Successfully imported from config.prompts.")
+
+    log.info("helpers.ai_helpers: Importing magic...")
+    try:
+        import magic
+        log.info("helpers.ai_helpers: Successfully imported magic.")
+    except ImportError:
+        log.error("The 'python-magic' library is not installed or its dependency 'libmagic' is missing.")
+        magic = None
+
+    log.info("helpers.ai_helpers: Importing docx...")
+    try:
+        import docx
+        log.info("helpers.ai_helpers: Successfully imported docx.")
+    except ImportError:
+        log.error("The 'python-docx' library is not installed.")
+        docx = None
+
+    log.info("helpers.ai_helpers: All imports successful.")
+
+except Exception as e:
+    log.error("helpers.ai_helpers: FAILED during import", error=str(e), exc_info=True)
+    import sys
+    sys.exit(1)
+# --- End Debugging Imports ---
+
 
 class UnsupportedFileTypeError(Exception):
     """Custom exception for files that cannot be converted."""

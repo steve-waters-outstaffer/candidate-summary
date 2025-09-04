@@ -13,7 +13,6 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { logoutUser } from '../services/AuthService.js';
 import CandidateSummaryGenerator from './CandidateSummaryGenerator';
-import MultipleCandidatesGenerator from './MultipleCandidatesGenerator';
 import BulkGenerator from './BulkGenerator';
 import { CustomColors } from '../theme';
 
@@ -21,6 +20,10 @@ const Dashboard = () => {
     const { currentUser } = useAuth();
     const navigate = useNavigate();
     const [currentTab, setCurrentTab] = useState(0);
+
+    // State for the bulk generation job, lifted up from BulkGenerator
+    const [bulkJobId, setBulkJobId] = useState(null);
+    const [bulkJobStatus, setBulkJobStatus] = useState(null);
 
     const handleTabChange = (event, newValue) => {
         setCurrentTab(newValue);
@@ -36,10 +39,10 @@ const Dashboard = () => {
     };
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: CustomColors.UIGrey100 }}>
-            <AppBar position="static" color="secondary">
+        <Box sx={{ display: 'flex' }}>
+            <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1, backgroundColor: CustomColors.MidnightBlue }}>
                 <Toolbar>
-                    <Typography color="default" variant="h6" component="div" sx={{ flexGrow: 1 }}>
+                    <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
                         AI Candidate Summary
                     </Typography>
                     <Typography variant="body2" sx={{ mr: 2 }}>
@@ -57,22 +60,28 @@ const Dashboard = () => {
             </AppBar>
 
             <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
+                {/* This Toolbar component adds the necessary spacing below the fixed AppBar */}
+                <Toolbar />
                 <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
                     <Tabs
                         value={currentTab}
                         onChange={handleTabChange}
-                        left
                     >
                         <Tab label="Single Candidate Summary" />
-                        {/* <Tab label="Multi-Candidate Email" /> */}
                         <Tab label="Bulk Job Processor" />
                     </Tabs>
                 </Box>
 
                 <Box sx={{ pt: 3 }}>
                     {currentTab === 0 && <CandidateSummaryGenerator />}
-                    {/*  {currentTab === 1 && <MultipleCandidatesGenerator />} */}
-                    {currentTab === 1 && <BulkGenerator />}
+                    {currentTab === 1 && (
+                        <BulkGenerator
+                            jobId={bulkJobId}
+                            setJobId={setBulkJobId}
+                            jobStatus={bulkJobStatus}
+                            setJobStatus={setBulkJobStatus}
+                        />
+                    )}
                 </Box>
             </Container>
         </Box>
