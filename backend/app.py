@@ -114,13 +114,33 @@ except Exception as e:
 # 2. BLUEPRINT REGISTRATION
 # ==============================================================================
 # Now structlog is configured, safe to import modules that use it
-from routes.single import single_bp
-from routes.multi import multi_bp
-from routes.bulk import bulk_bp
+log.info("importing_blueprints")
+try:
+    log.info("Importing routes.single...")
+    from routes.single import single_bp
+    log.info("Successfully imported routes.single.")
 
-app.register_blueprint(single_bp, url_prefix='/api')
-app.register_blueprint(multi_bp, url_prefix='/api')
-app.register_blueprint(bulk_bp, url_prefix='/api')
+    log.info("Importing routes.multi...")
+    from routes.multi import multi_bp
+    log.info("Successfully imported routes.multi.")
+
+    log.info("Importing routes.bulk...")
+    from routes.bulk import bulk_bp
+    log.info("Successfully imported routes.bulk.")
+
+    log.info("blueprints_imported")
+
+    log.info("registering_blueprints")
+    app.register_blueprint(single_bp, url_prefix='/api')
+    app.register_blueprint(multi_bp, url_prefix='/api')
+    app.register_blueprint(bulk_bp, url_prefix='/api')
+    log.info("blueprints_registered")
+
+except Exception as e:
+    log.error("An error occurred during blueprint import.", error=str(e), exc_info=True)
+    # Exit here if an import fails, to make it clear.
+    import sys
+    sys.exit(1)
 
 
 # ==============================================================================

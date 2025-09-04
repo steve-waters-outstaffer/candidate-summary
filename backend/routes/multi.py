@@ -4,18 +4,19 @@ import json
 import re
 from flask import Blueprint, request, jsonify, current_app
 import structlog
-
 from config.prompts import build_full_prompt
-from helpers import (
+from helpers.recruitcrm_helpers import (
     fetch_recruitcrm_job,
     fetch_recruitcrm_assigned_candidates,
     fetch_recruitcrm_candidate,
     fetch_alpharun_interview,
     fetch_candidate_interview_id,
-    upload_resume_to_gemini,
-    generate_html_summary,
     push_to_recruitcrm_internal,
     fetch_recruitcrm_candidate_job_specific_fields
+)
+from helpers.ai_helpers import (
+    upload_resume_to_gemini,
+    generate_html_summary
 )
 
 log = structlog.get_logger()

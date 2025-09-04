@@ -4,22 +4,26 @@ import datetime
 import re
 from flask import Blueprint, request, jsonify, current_app
 import structlog
-
 from config.prompts import get_available_prompts
-from helpers import (
+import requests
+from helpers.recruitcrm_helpers import (
     fetch_recruitcrm_candidate,
     fetch_recruitcrm_job,
     fetch_alpharun_interview,
-    extract_fireflies_transcript_id,
-    fetch_fireflies_transcript,
-    normalise_fireflies_transcript,
-    upload_resume_to_gemini,
-    generate_html_summary,
     get_recruitcrm_headers,
     fetch_recruitcrm_candidate_job_specific_fields,
     fetch_candidate_interview_id
 )
-import requests
+from helpers.fireflies_helpers import (
+    extract_fireflies_transcript_id,
+    fetch_fireflies_transcript,
+    normalise_fireflies_transcript
+)
+from helpers.ai_helpers import (
+    upload_resume_to_gemini,
+    generate_html_summary
+)
+
 
 log = structlog.get_logger()
 

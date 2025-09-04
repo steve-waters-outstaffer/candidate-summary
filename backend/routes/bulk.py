@@ -7,23 +7,25 @@ from flask import Blueprint, request, jsonify, current_app
 import uuid
 import threading
 import structlog
-
-# In-memory job store. For a production environment, you might replace this
-# with a more persistent store like Redis or Firestore.
-BULK_JOBS = {}
-
-from config.prompts import build_full_prompt
-from helpers import (
+from helpers.recruitcrm_helpers import (
     fetch_recruitcrm_assigned_candidates,
     fetch_hiring_pipeline,
     fetch_recruitcrm_job,
     fetch_candidate_interview_id,
     fetch_alpharun_interview,
-    upload_resume_to_gemini,
-    generate_html_summary,
     fetch_recruitcrm_candidate_job_specific_fields,
     fetch_recruitcrm_candidate
 )
+from helpers.ai_helpers import (
+    upload_resume_to_gemini,
+    generate_html_summary
+)
+from config.prompts import build_full_prompt
+# In-memory job store. For a production environment, you might replace this
+# with a more persistent store like Redis or Firestore.
+BULK_JOBS = {}
+
+
 
 log = structlog.get_logger()
 
