@@ -39,6 +39,7 @@ CORS(app,
      )
 
 # --- Configure Logging ---
+# CRITICAL: This MUST be configured BEFORE importing any modules that use structlog
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 def rename_level_to_severity(logger, method_name, event_dict):
@@ -76,8 +77,6 @@ structlog.configure(
 
 log = structlog.get_logger()
 
-
-
 @app.before_request
 def before_request():
     request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())
@@ -114,6 +113,7 @@ except Exception as e:
 # ==============================================================================
 # 2. BLUEPRINT REGISTRATION
 # ==============================================================================
+# Now structlog is configured, safe to import modules that use it
 from routes.single import single_bp
 from routes.multi import multi_bp
 from routes.bulk import bulk_bp
@@ -139,4 +139,5 @@ def health_check():
 # ==============================================================================
 
 if __name__ == '__main__':
+    log.info("flask_server.starting")
     app.run(debug=False, host='0.0.0.0', port=5000)

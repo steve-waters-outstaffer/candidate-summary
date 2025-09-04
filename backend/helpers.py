@@ -9,7 +9,7 @@ import tempfile
 from urllib.parse import urlparse
 import google.generativeai as genai
 from config.prompts import build_full_prompt
-from file_converter import convert_to_supported_format, UnsupportedFileTypeError
+#from file_converter import convert_to_supported_format, UnsupportedFileTypeError
 
 log = structlog.get_logger()
 
