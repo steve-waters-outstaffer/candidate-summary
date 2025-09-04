@@ -6,48 +6,26 @@ from flask import Blueprint, request, jsonify, current_app
 import structlog
 import requests
 
-# --- Start Debugging Imports ---
+from config.prompts import get_available_prompts
+from helpers.ai_helpers import (
+    generate_html_summary,
+    upload_resume_to_gemini,
+)
+from helpers.fireflies_helpers import (
+    extract_fireflies_transcript_id,
+    fetch_fireflies_transcript,
+    normalise_fireflies_transcript,
+)
+from helpers.recruitcrm_helpers import (
+    fetch_alpharun_interview,
+    fetch_candidate_interview_id,
+    fetch_recruitcrm_candidate,
+    fetch_recruitcrm_candidate_job_specific_fields,
+    fetch_recruitcrm_job,
+    get_recruitcrm_headers,
+)
+
 log = structlog.get_logger()
-log.info("routes.single: Top of file, starting imports.")
-
-try:
-    log.info("routes.single: Importing from config.prompts...")
-    from config.prompts import get_available_prompts
-    log.info("routes.single: Successfully imported from config.prompts.")
-
-    log.info("routes.single: Importing from helpers.recruitcrm_helpers...")
-    from helpers.recruitcrm_helpers import (
-        fetch_recruitcrm_candidate,
-        fetch_recruitcrm_job,
-        fetch_alpharun_interview,
-        get_recruitcrm_headers,
-        fetch_recruitcrm_candidate_job_specific_fields,
-        fetch_candidate_interview_id
-    )
-    log.info("routes.single: Successfully imported from helpers.recruitcrm_helpers.")
-
-    log.info("routes.single: Importing from helpers.fireflies_helpers...")
-    from helpers.fireflies_helpers import (
-        extract_fireflies_transcript_id,
-        fetch_fireflies_transcript,
-        normalise_fireflies_transcript
-    )
-    log.info("routes.single: Successfully imported from helpers.fireflies_helpers.")
-
-    log.info("routes.single: Importing from helpers.ai_helpers...")
-    from helpers.ai_helpers import (
-        upload_resume_to_gemini,
-        generate_html_summary
-    )
-    log.info("routes.single: Successfully imported from helpers.ai_helpers.")
-
-except Exception as e:
-    log.error("routes.single: FAILED during import", error=str(e), exc_info=True)
-    import sys
-    sys.exit(1)
-
-log.info("routes.single: All imports successful.")
-# --- End Debugging Imports ---
 
 
 single_bp = Blueprint('single_api', __name__)
@@ -55,9 +33,9 @@ single_bp = Blueprint('single_api', __name__)
 @single_bp.route('/prompts', methods=['GET'])
 def list_prompts():
     """Returns a list of available prompt configurations."""
-    log.info("single.prompts.hit")
+    category = request.args.get('category', 'single')
+    log.info("single.list_prompts.called", category=category)
     try:
-        category = request.args.get('category', 'single')  # Default to single
         prompts = get_available_prompts(category)
         return jsonify(prompts), 200
     except Exception as e:
@@ -67,9 +45,9 @@ def list_prompts():
 @single_bp.route('/test-candidate', methods=['POST'])
 def test_candidate():
     """Tests the connection to the RecruitCRM candidate API."""
-    log.info("single.test_candidate.hit")
     data = request.get_json()
     slug = data.get('candidate_slug')
+    log.info("single.test_candidate.called", candidate_slug=slug)
     if not slug:
         return jsonify({'error': 'Missing candidate_slug'}), 400
 
@@ -94,9 +72,9 @@ def test_candidate():
 @single_bp.route('/test-job', methods=['POST'])
 def test_job():
     """Tests the connection to the RecruitCRM job API."""
-    log.info("single.test_job.hit")
     data = request.get_json()
     slug = data.get('job_slug')
+    log.info("single.test_job.called", job_slug=slug)
     if not slug:
         return jsonify({'error': 'Missing job_slug'}), 400
 
@@ -119,11 +97,10 @@ def test_job():
 @single_bp.route('/test-interview', methods=['POST'])
 def test_interview():
     """Tests the connection to the AlphaRun interview API."""
-    log.info("single.test_interview.hit")
     data = request.get_json()
-
     candidate_slug = data.get('candidate_slug')
     job_slug = data.get('job_slug')
+    log.info("single.test_interview.called", candidate_slug=candidate_slug, job_slug=job_slug)
 
     if not candidate_slug or not job_slug:
         return jsonify({'error': 'Missing candidate_slug or job_slug'}), 400
@@ -162,11 +139,9 @@ def test_interview():
 @single_bp.route('/test-fireflies', methods=['POST'])
 def test_fireflies():
     """Tests the connection to the Fireflies API and returns the meeting title."""
-    log.info("single.test_fireflies.hit")
     data = request.get_json()
-
-    # Check for both 'fireflies_url' and 'transcript_url' to handle inconsistency
     transcript_url = data.get('fireflies_url') or data.get('transcript_url')
+    log.info("single.test_fireflies.called", transcript_url=transcript_url)
 
     if not transcript_url:
         return jsonify({'error': 'Missing fireflies_url or transcript_url'}), 400
@@ -187,9 +162,9 @@ def test_fireflies():
 @single_bp.route('/test-resume', methods=['POST'])
 def test_resume():
     """Checks for the presence of a resume in the candidate data."""
-    log.info("single.test_resume.hit")
     data = request.get_json()
     candidate_slug = data.get('candidate_slug')
+    log.info("single.test_resume.called", candidate_slug=candidate_slug)
     if not candidate_slug:
         return jsonify({'error': 'Missing candidate_slug'}), 400
 
@@ -210,14 +185,15 @@ def test_resume():
 @single_bp.route('/generate-summary', methods=['POST'])
 def generate_summary():
     """Generate candidate summary, optionally including Fireflies and interview data."""
-    log.info("single.generate_summary.hit")
+    data = request.get_json()
+    candidate_slug = data.get('candidate_slug')
+    job_slug = data.get('job_slug')
+    fireflies_url = data.get('fireflies_url')
+    prompt_type = data.get('prompt_type', 'recruitment.detailed')
+    log.info("single.generate_summary.called", candidate_slug=candidate_slug, job_slug=job_slug, fireflies_url=fireflies_url, prompt_type=prompt_type)
+
     try:
-        data = request.get_json()
-        candidate_slug = data.get('candidate_slug')
-        job_slug = data.get('job_slug')
-        fireflies_url = data.get('fireflies_url')
         additional_context = data.get('additional_context', '')
-        prompt_type = data.get('prompt_type', 'recruitment.detailed')
         model = current_app.model
 
         if not all([candidate_slug, job_slug]):
@@ -286,17 +262,15 @@ def generate_summary():
 @single_bp.route('/push-to-recruitcrm', methods=['POST'])
 def push_to_recruitcrm():
     """Push generated summary to RecruitCRM candidate record"""
-    log.info("single.push_to_recruitcrm.hit")
+    data = request.get_json()
+    candidate_slug = data.get('candidate_slug')
+    html_summary = data.get('html_summary')
+    log.info(
+        "single.push_to_recruitcrm.called",
+        candidate_slug=candidate_slug,
+        html_length=len(html_summary) if html_summary else 0,
+    )
     try:
-        data = request.get_json()
-        candidate_slug = data.get('candidate_slug')
-        html_summary = data.get('html_summary')
-        log.info(
-            "single.push_to_recruitcrm.request",
-            candidate_slug=candidate_slug,
-            html_length=len(html_summary) if html_summary else 0,
-        )
-
         if not candidate_slug or not html_summary:
             log.error("single.push_to_recruitcrm.missing_data")
             return jsonify({'error': 'Missing candidate slug or HTML summary'}), 400
@@ -322,12 +296,12 @@ def push_to_recruitcrm():
 @single_bp.route('/log-feedback', methods=['POST'])
 def log_feedback():
     """Receives and logs user feedback on a generated summary to Firestore."""
-    log.info("single.log_feedback.hit")
+    data = request.get_json()
+    log.info("single.log_feedback.called", has_rating=data.get('rating') is not None, has_comments=bool(data.get('comments')))
     db = current_app.db
     if not db:
         return jsonify({'error': 'Firestore is not configured on the server'}), 500
     try:
-        data = request.get_json()
         feedback_data = {
             'rating': data.get('rating'),
             'comments': data.get('comments', ''),
