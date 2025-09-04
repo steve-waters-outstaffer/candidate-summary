@@ -41,10 +41,29 @@ CORS(app,
 # --- Configure Logging ---
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+def rename_level_to_severity(logger, method_name, event_dict):
+    """
+    Log processor to rename the 'level' key to 'severity' and format it for
+    Google Cloud Logging.
+    """
+    if "level" in event_dict:
+        level = event_dict.pop("level")
+        # Map standard log levels to Google Cloud Logging's severity levels
+        severity_mapping = {
+            "debug": "DEBUG",
+            "info": "INFO",
+            "warning": "WARNING",
+            "error": "ERROR",
+            "critical": "CRITICAL",
+        }
+        event_dict["severity"] = severity_mapping.get(level, "DEFAULT")
+    return event_dict
+
 structlog.configure(
     processors=[
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
+        rename_level_to_severity,  # <-- Add this line
         structlog.processors.StackInfoRenderer(),
         structlog.dev.set_exc_info,
         structlog.processors.TimeStamper(fmt="iso"),
@@ -56,6 +75,7 @@ structlog.configure(
 )
 
 log = structlog.get_logger()
+
 
 
 @app.before_request
