@@ -36,6 +36,7 @@ def process_candidates_background(job_id, app_context):
     This function runs in a background thread to process candidates
     without blocking the main request.
     """
+    log.info("bulk.process_candidates_background.started", job_id=job_id)
     with app_context:
         job_details = BULK_JOBS[job_id]
         job_slug = job_details['job_slug']
@@ -47,6 +48,7 @@ def process_candidates_background(job_id, app_context):
             if not job_data:
                 job_details['status'] = 'failed'
                 job_details['error'] = 'Could not fetch job data.'
+                log.error("bulk.process_candidates_background.fetch_job_failed", job_id=job_id, job_slug=job_slug)
                 return
 
             job_details_data = job_data.get('data', job_data)
@@ -128,6 +130,7 @@ def process_candidates_background(job_id, app_context):
                 job_details['processed_count'] += 1
 
             job_details['status'] = 'complete'
+            log.info("bulk.process_candidates_background.completed", job_id=job_id)
 
         except Exception as e:
             log.error(
@@ -141,7 +144,7 @@ def process_candidates_background(job_id, app_context):
 @bulk_bp.route('/job-stages-with-counts/<job_slug>', methods=['GET'])
 def get_job_stages_with_counts(job_slug):
     """Fetches job name, and all candidates for a job, counts them by stage, and returns a list of stages that have at least one candidate."""
-    log.info("bulk.job_stages_with_counts.hit", job_slug=job_slug)
+    log.info("bulk.get_job_stages_with_counts.called", job_slug=job_slug)
 
     # Attempt to fetch the job details first.
     job_data = fetch_recruitcrm_job(job_slug)
@@ -184,7 +187,7 @@ def get_job_stages_with_counts(job_slug):
 @bulk_bp.route('/candidates-in-stage/<job_slug>/<stage_id>', methods=['GET'])
 def get_candidates_in_stage(job_slug, stage_id):
     """Fetches a list of candidates in a specific stage for a job."""
-    log.info("bulk.candidates_in_stage.hit", job_slug=job_slug, stage_id=stage_id)
+    log.info("bulk.get_candidates_in_stage.called", job_slug=job_slug, stage_id=stage_id)
     candidates = fetch_recruitcrm_assigned_candidates(job_slug, status_id=stage_id)
 
     formatted_candidates = []
@@ -204,11 +207,11 @@ def start_bulk_process_job():
     Starts an asynchronous job to process summaries for multiple candidates.
     Returns a job ID for polling the status.
     """
-    log.info("bulk.process_job.hit")
     data = request.get_json()
     job_url = data.get('job_url')
     single_prompt = data.get('single_candidate_prompt')
     candidate_slugs = data.get('candidate_slugs', [])
+    log.info("bulk.start_bulk_process_job.called", job_url=job_url, single_prompt=single_prompt, candidate_count=len(candidate_slugs))
 
     if not all([job_url, single_prompt, candidate_slugs]):
         return jsonify({'error': 'Missing job_url, single_candidate_prompt, or candidate_slugs'}), 400
@@ -239,12 +242,14 @@ def start_bulk_process_job():
     thread = threading.Thread(target=process_candidates_background, args=(job_id, current_app.app_context()))
     thread.daemon = True
     thread.start()
+    log.info("bulk.start_bulk_process_job.thread_started", job_id=job_id)
 
     return jsonify({'message': 'Job started', 'job_id': job_id}), 202
 
 @bulk_bp.route('/bulk-job-status/<job_id>', methods=['GET'])
 def get_bulk_job_status(job_id):
     """Pollable endpoint to get the status and results of a bulk processing job."""
+    log.info("bulk.get_bulk_job_status.called", job_id=job_id)
     job = BULK_JOBS.get(job_id)
     if not job:
         return jsonify({'error': 'Job not found'}), 404
@@ -264,13 +269,10 @@ def get_bulk_job_status(job_id):
 @bulk_bp.route('/generate-bulk-email', methods=['POST'])
 def generate_bulk_email():
     """Generates the final multi-candidate email from completed summaries."""
-    log.info("bulk.generate_bulk_email.hit")
     data = request.get_json()
     job_id = data.get('job_id')
     multi_prompt = data.get('multi_candidate_prompt')
-    client_name = data.get('client_name')
-    outstaffer_job_url = data.get('outstaffer_job_url')
-
+    log.info("bulk.generate_bulk_email.called", job_id=job_id, multi_prompt=multi_prompt)
 
     if not all([job_id, multi_prompt]):
         return jsonify({'error': 'Missing job_id or multi_candidate_prompt'}), 400
@@ -303,8 +305,8 @@ def generate_bulk_email():
         candidate_names_str = "\n".join(successful_summaries.keys())
 
         prompt_kwargs = {
-            'client_name': client_name or job_details.get('company', {}).get('name', 'Valued Client'),
-            'job_url': outstaffer_job_url,
+            'client_name': data.get('client_name') or job_details.get('company', {}).get('name', 'Valued Client'),
+            'job_url': data.get('outstaffer_job_url'),
             'job_title': job_details.get('name', ''),
             'job_data': job_details,
             'processed_summaries': summaries_as_string,
@@ -318,7 +320,7 @@ def generate_bulk_email():
 
         if response and response.text:
             cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
-            link_url = outstaffer_job_url or f"https://app.recruitcrm.io/jobs/{job_slug}"
+            link_url = data.get('outstaffer_job_url') or f"https://app.recruitcrm.io/jobs/{job_slug}"
             email_html = cleaned_content.replace('[HERE_LINK]', f'<a href="{link_url}">here</a>')
 
             BULK_JOBS[job_id]['email_html'] = email_html

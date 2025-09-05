@@ -26,12 +26,13 @@ multi_bp = Blueprint('multi_api', __name__)
 @multi_bp.route('/generate-multiple-candidates', methods=['POST'])
 def generate_multiple_candidates():
     """Generates content for multiple candidates."""
-    log.info("multi.generate_multiple_candidates.hit")
+    data = request.get_json()
+    candidate_slugs = data.get('candidate_slugs', [])
+    job_slug = data.get('job_slug')
+    prompt_type = data.get('prompt_type', 'candidate-submission')
+    log.info("multi.generate_multiple_candidates.called", candidate_slugs=candidate_slugs, job_slug=job_slug, prompt_type=prompt_type)
+
     try:
-        data = request.get_json()
-        candidate_slugs = data.get('candidate_slugs', [])
-        job_slug = data.get('job_slug')
-        prompt_type = data.get('prompt_type', 'candidate-submission')
         client_name = data.get('client_name', '')
         preferred_candidate = data.get('preferred_candidate', '')
         additional_context = data.get('additional_context', '')
@@ -150,7 +151,6 @@ def generate_multiple_candidates():
 @multi_bp.route('/process-curated-candidates', methods=['POST'])
 def process_curated_candidates():
     """Processes a curated list of candidates for a specific job."""
-    log.info("multi.process_curated_candidates.hit")
     data = request.get_json()
     job_slug = data.get('job_slug')
     candidate_slugs = data.get('candidate_slugs', [])
@@ -159,6 +159,8 @@ def process_curated_candidates():
     auto_push = data.get('auto_push', False)
     generate_summaries = data.get('generate_summaries', False)
     generate_email = data.get('generate_email', True)
+    log.info("multi.process_curated_candidates.called", job_slug=job_slug, candidate_slugs=candidate_slugs, single_prompt=single_prompt, multi_prompt=multi_prompt, auto_push=auto_push, generate_summaries=generate_summaries, generate_email=generate_email)
+
     model = current_app.model
 
     if not (generate_summaries or generate_email):

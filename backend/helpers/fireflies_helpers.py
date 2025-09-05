@@ -25,6 +25,7 @@ ULID_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 
 def get_fireflies_headers():
     """Returns the authorization headers for the Fireflies.ai API."""
+    log.info("fireflies.get_fireflies_headers.called")
     if not FIREFLIES_API_KEY:
         raise ValueError("FIREFLIES_API_KEY is not set in the environment.")
     return {
@@ -34,6 +35,7 @@ def get_fireflies_headers():
 
 def extract_fireflies_transcript_id(s: str) -> str | None:
     """Parses a string to find a Fireflies transcript ID."""
+    log.info("fireflies.extract_fireflies_transcript_id.called")
     if not s:
         return None
     s = s.strip()
@@ -42,23 +44,29 @@ def extract_fireflies_transcript_id(s: str) -> str | None:
             path_segment = urlparse(s).path.rsplit("/", 1)[-1]
             parts = path_segment.split("::")
             if len(parts) == 2 and ULID_PATTERN.fullmatch(parts[1]):
+                log.info("fireflies.extract_fireflies_transcript_id.extracted_from_url", transcript_id=parts[1])
                 return parts[1]
         except (IndexError, ValueError):
+            log.warning("fireflies.extract_fireflies_transcript_id.url_parse_failed", url=s)
             return None
     if ULID_PATTERN.fullmatch(s):
+        log.info("fireflies.extract_fireflies_transcript_id.ulid_matched", transcript_id=s)
         return s
+    log.warning("fireflies.extract_fireflies_transcript_id.no_id_found", input_string=s)
     return None
 
 def fetch_fireflies_transcript(transcript_id: str) -> dict | None:
     """Fetches a transcript from Fireflies.ai using GraphQL."""
+    log.info("fireflies.fetch_fireflies_transcript.called", transcript_id=transcript_id)
     payload = {"query": TRANSCRIPT_QUERY, "variables": {"id": transcript_id}}
     try:
         resp = requests.post(GRAPHQL_URL, json=payload, headers=get_fireflies_headers(), timeout=30)
         resp.raise_for_status()
         response_data = resp.json()
         if "errors" in response_data:
-            log.error("fireflies.fetch_transcript.graphql_error", transcript_id=transcript_id)
+            log.error("fireflies.fetch_transcript.graphql_error", transcript_id=transcript_id, errors=response_data["errors"])
             return None
+        log.info("fireflies.fetch_fireflies_transcript.success", transcript_id=transcript_id)
         return response_data.get("data", {}).get("transcript")
     except requests.exceptions.RequestException as e:
         log.error("fireflies.fetch_transcript.request_error", transcript_id=transcript_id, error=str(e))
@@ -69,12 +77,15 @@ def fetch_fireflies_transcript(transcript_id: str) -> dict | None:
 
 def normalise_fireflies_transcript(raw_transcript):
     """Normalises raw Fireflies transcript data into a structured format."""
+    log.info("fireflies.normalise_fireflies_transcript.called")
     if not raw_transcript:
         return {'metadata': {}, 'content': "Not provided."}
 
     title = raw_transcript.get('title', 'N/A')
     sentences = raw_transcript.get('sentences', [])
     content = '\n'.join([f"{s.get('speaker_name', 'Unknown')}: {s.get('text', '')}" for s in sentences])
+
+    log.info("fireflies.normalise_fireflies_transcript.success", title=title, sentence_count=len(sentences))
 
     return {
         'metadata': {'title': title},
