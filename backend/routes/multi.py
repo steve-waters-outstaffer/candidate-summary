@@ -35,7 +35,7 @@ def generate_multiple_candidates():
         client_name = data.get('client_name', '')
         preferred_candidate = data.get('preferred_candidate', '')
         additional_context = data.get('additional_context', '')
-        model = current_app.model
+        client = current_app.client
 
         if not candidate_slugs or not job_slug:
             return jsonify({'error': 'At least one candidate slug and a job slug are required'}), 400
@@ -91,7 +91,7 @@ def generate_multiple_candidates():
             gemini_resume_file = None
             resume_info = candidate_details.get('resume')
             if resume_info:
-                gemini_resume_file = upload_resume_to_gemini(resume_info)
+                gemini_resume_file = upload_resume_to_gemini(resume_info, client)
                 if gemini_resume_file:
                     resume_files.append(gemini_resume_file)
 
@@ -137,7 +137,10 @@ def generate_multiple_candidates():
         if resume_files:
             prompt_contents.extend(resume_files)
 
-        response = model.generate_content(prompt_contents)
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=prompt_contents
+        )
         cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
         final_content = cleaned_content.replace('[HERE_LINK]', f'<a href="https://app.recruitcrm.io/jobs/{job_slug}">here</a>')
 
@@ -159,7 +162,7 @@ def process_curated_candidates():
     auto_push = data.get('auto_push', False)
     generate_summaries = data.get('generate_summaries', False)
     generate_email = data.get('generate_email', True)
-    model = current_app.model
+    client = current_app.client
 
     if not (generate_summaries or generate_email):
         return jsonify({'error': 'No action requested.'}), 400
@@ -202,7 +205,7 @@ def process_curated_candidates():
 
                     gemini_resume_file = None
                     if candidate_details.get('resume'):
-                        gemini_resume_file = upload_resume_to_gemini(candidate_details.get('resume'))
+                        gemini_resume_file = upload_resume_to_gemini(candidate_details.get('resume'), client)
 
                     interview_data = None
                     if alpharun_job_id:
@@ -210,7 +213,7 @@ def process_curated_candidates():
                         if interview_id:
                             interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
 
-                    summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, model)
+                    summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, client)
 
                     if summary:
                         processed_summaries_list.append({'name': name, 'slug': slug, 'html': summary})
@@ -233,7 +236,10 @@ def process_curated_candidates():
                     'additional_context': data.get('additional_context')
                 }
                 full_prompt = build_full_prompt(multi_prompt, "multiple", **prompt_kwargs)
-                response = model.generate_content([full_prompt])
+                response = client.models.generate_content(
+                    model='gemini-2.0-flash',
+                    contents=[full_prompt]
+                )
                 if response and response.text:
                     cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
                     link = data.get('job_url')

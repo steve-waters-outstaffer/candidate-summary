@@ -218,7 +218,7 @@ def generate_summary():
         fireflies_url = data.get('fireflies_url')
         additional_context = data.get('additional_context', '')
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
-        model = current_app.model
+        client = current_app.client
 
         if not all([candidate_slug, job_slug]):
             return jsonify({'error': 'Missing required RecruitCRM fields'}), 400
@@ -262,7 +262,7 @@ def generate_summary():
             candidate_details = candidate_data.get('data', candidate_data)
             resume_info = candidate_details.get('resume')
             if resume_info:
-                gemini_resume_file = upload_resume_to_gemini(resume_info)
+                gemini_resume_file = upload_resume_to_gemini(resume_info, client)
 
         fireflies_data = None
         if fireflies_url:
@@ -272,7 +272,7 @@ def generate_summary():
                 if raw_transcript:
                     fireflies_data = normalise_fireflies_transcript(raw_transcript)
 
-        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, model)
+        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, client)
 
         if html_summary:
             return jsonify({'success': True, 'html_summary': html_summary, 'candidate_slug': candidate_slug})

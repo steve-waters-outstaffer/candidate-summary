@@ -17,9 +17,9 @@ try:
     log.info("helpers.ai_helpers: Importing requests...")
     import requests
 
-    log.info("helpers.ai_helpers: Importing google.generativeai...")
-    import google.generativeai as genai
-    log.info("helpers.ai_helpers: Successfully imported google.generativeai.")
+    log.info("helpers.ai_helpers: Importing google.genai...")
+    import google.genai as genai
+    log.info("helpers.ai_helpers: Successfully imported google.genai.")
 
     log.info("helpers.ai_helpers: Importing from config.prompts...")
     from config.prompts import build_full_prompt
@@ -77,7 +77,7 @@ def convert_to_supported_format(file_bytes: bytes, original_filename: str) -> tu
 
     raise UnsupportedFileTypeError(f"File type '{detected_mime_type}' is not supported.")
 
-def upload_resume_to_gemini(resume_info):
+def upload_resume_to_gemini(resume_info, client):
     """Downloads, converts, and uploads a resume to the Gemini API."""
     if not resume_info: return None
     resume_url = resume_info.get('file_link') or resume_info.get('url')
@@ -97,8 +97,8 @@ def upload_resume_to_gemini(resume_info):
             tmp_file_path = tmp_file.name
 
         try:
-            gemini_file = genai.upload_file(
-                path=tmp_file_path,
+            gemini_file = client.files.upload(
+                file=tmp_file_path,
                 display_name=original_filename,
                 mime_type=final_mime_type
             )
@@ -113,16 +113,19 @@ def upload_resume_to_gemini(resume_info):
         log.error("ai.upload_resume.unexpected_error", error=str(e))
         return None
 
-def generate_ai_response(model, prompt_parts):
+def generate_ai_response(client, prompt_parts):
     """Generates a response from the AI model."""
     try:
-        response = model.generate_content(prompt_parts)
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=prompt_parts
+        )
         return response.text
     except Exception as e:
         log.error("ai.generate_response.error", error=str(e))
         return None
 
-def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, model):
+def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, client):
     """Builds the full prompt and generates an HTML summary using the AI model."""
     full_prompt = build_full_prompt(
         prompt_type,
@@ -137,7 +140,7 @@ def generate_html_summary(candidate_data, job_data, interview_data, additional_c
     if gemini_resume_file:
         prompt_parts.append(gemini_resume_file)
 
-    html_summary = generate_ai_response(model, prompt_parts)
+    html_summary = generate_ai_response(client, prompt_parts)
     if html_summary:
         return sub(r'^```(html)?\n|```$', '', html_summary, flags=MULTILINE).strip()
     return html_summary

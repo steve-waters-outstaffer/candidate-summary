@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from flask_cors import CORS
 from dotenv import load_dotenv
-import google.generativeai as genai
+import google.genai as genai
 from google.cloud import firestore
 
 # Load environment variables from a .env file
@@ -31,7 +31,9 @@ CORS(app,
      origins=[
          "https://candidate-summary-ai.web.app",  # Deployed frontend
          "http://localhost:5173",                 # Local development (Vite)
-         "http://localhost:3000"                  # Local development (Create React App)
+         "http://localhost:3000",
+         "http://localhost:5174"
+         # Local development (Create React App)
      ],
      methods=["GET", "POST", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"],
@@ -91,14 +93,17 @@ for key in required_keys:
 
 # --- Configure Google Gemini ---
 try:
+    from google.genai.types import HttpOptions
     GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-    genai.configure(api_key=GOOGLE_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    app.model = model  # Attach model to app context
+    client = genai.Client(
+        api_key=GOOGLE_API_KEY,
+        http_options=HttpOptions(api_version="v1")
+    )
+    app.client = client  # Attach client to app context
     log.info("google_gemini.configured")
 except Exception as e:
     log.error("google_gemini.configuration_failed", error=str(e))
-    app.model = None
+    app.client = None
 
 # --- Firestore Configuration ---
 try:

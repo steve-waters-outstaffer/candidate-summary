@@ -40,7 +40,7 @@ def process_candidates_background(job_id, app_context):
         job_details = BULK_JOBS[job_id]
         job_slug = job_details['job_slug']
         single_prompt = job_details['single_prompt']
-        model = current_app.model
+        client = current_app.client
 
         try:
             job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True)
@@ -73,9 +73,23 @@ def process_candidates_background(job_id, app_context):
 
                     has_cv = False
                     gemini_resume_file = None
-                    if candidate_details_data.get('resume'):
-                        gemini_resume_file = upload_resume_to_gemini(candidate_details_data.get('resume'))
+                    resume_info = candidate_details_data.get('resume')
+                    log.info(
+                        "bulk.process_candidates_background.resume_check",
+                        candidate_slug=slug,
+                        has_resume_data=bool(resume_info),
+                        resume_filename=resume_info.get('filename') if resume_info else None,
+                        resume_url=resume_info.get('file_link') or resume_info.get('url') if resume_info else None
+                    )
+                    if resume_info:
+                        gemini_resume_file = upload_resume_to_gemini(resume_info, client)
                         has_cv = True if gemini_resume_file else False
+                        log.info(
+                            "bulk.process_candidates_background.resume_upload_result",
+                            candidate_slug=slug,
+                            upload_successful=bool(gemini_resume_file),
+                            has_cv_flag=has_cv
+                        )
 
 
                     has_ai_interview = False
@@ -99,7 +113,7 @@ def process_candidates_background(job_id, app_context):
                         log.info("bulk.process_candidates_background.no_ai_job_id")
 
 
-                    summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, model)
+                    summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, client)
 
                     if summary:
                         BULK_JOBS[job_id]['results'][slug] = {
@@ -314,7 +328,10 @@ def generate_bulk_email():
         }
 
         full_prompt = build_full_prompt(multi_prompt, "multiple", **prompt_kwargs)
-        response = current_app.model.generate_content([full_prompt])
+        response = current_app.client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=[full_prompt]
+        )
 
         if response and response.text:
             cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
