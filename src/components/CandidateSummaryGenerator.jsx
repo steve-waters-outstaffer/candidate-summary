@@ -560,7 +560,9 @@ const CandidateSummaryGenerator = () => {
                             </Collapse>
                             
                             <Box sx={{ display: 'flex', gap: Spacing.Default, alignItems: 'center', flexWrap: 'wrap' }}>
-                                <Button variant="contained" onClick={generateSummary} disabled={isGenerateDisabled}>{loading ? <CircularProgress size={24} /> : 'Generate Summary'}</Button>
+                                <Button variant="contained" onClick={generateSummary} disabled={isGenerateDisabled}>
+                                    {loading ? <CircularProgress size={24} /> : (createEmailDraft ? 'Generate Summary & Email' : 'Generate Summary')}
+                                </Button>
                                 <Button variant="text" startIcon={<Refresh />} onClick={resetApiStatus}>Reset</Button>
                             </Box>
                         </CardContent>
@@ -596,6 +598,7 @@ const CandidateSummaryGenerator = () => {
                                     <Tabs value={view} onChange={handleViewChange} aria-label="summary view tabs">
                                         <Tab label="Preview" value="preview" />
                                         <Tab label="HTML" value="html" />
+                                        {generatedEmailHtml && <Tab label="Email" value="email" />}
                                     </Tabs>
                                 </Box>
 
@@ -618,6 +621,12 @@ const CandidateSummaryGenerator = () => {
                                         }}
                                         onClick={(e) => e.target.select()}
                                     />
+                                )}
+
+                                {view === 'email' && generatedEmailHtml && (
+                                    <Paper sx={{ p: Spacing.Medium, backgroundColor: '#ffffff', border: `1px solid ${CustomColors.UIGrey300}`, borderRadius: 2 }}>
+                                        <Box dangerouslySetInnerHTML={{ __html: generatedEmailHtml }} />
+                                    </Paper>
                                 )}
 
                                 <Box sx={{ mt: 2, p: 2, border: `1px solid ${CustomColors.UIGrey300}`, borderRadius: 2, backgroundColor: '#fafafa' }}>

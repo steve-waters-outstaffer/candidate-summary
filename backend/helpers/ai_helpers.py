@@ -27,11 +27,11 @@ try:
 
     log.info("helpers.ai_helpers: Importing magic...")
     try:
-        import magic
-        log.info("helpers.ai_helpers: Successfully imported magic.")
+        import filetype # <--- CHANGE THIS IMPORT
+        log.info("helpers.ai_helpers: Successfully imported filetype.")
     except ImportError:
-        log.error("The 'python-magic' library is not installed or its dependency 'libmagic' is missing.")
-        magic = None
+        log.error("The 'filetype' library is not installed.")
+        filetype = None
 
     log.info("helpers.ai_helpers: Importing docx...")
     try:
@@ -56,11 +56,21 @@ class UnsupportedFileTypeError(Exception):
 
 def convert_to_supported_format(file_bytes: bytes, original_filename: str) -> tuple[bytes, str]:
     """Checks and converts a file to a supported format for Gemini."""
-    if not magic:
-        raise UnsupportedFileTypeError("The 'magic' library is not available for MIME type detection.")
+    if not filetype:
+        raise UnsupportedFileTypeError("The 'filetype' library is not available for MIME type detection.")
 
     SUPPORTED_MIME_TYPES = {'text/plain', 'application/pdf', 'image/png', 'image/jpeg'}
-    detected_mime_type = magic.from_buffer(file_bytes, mime=True)
+
+    kind = filetype.guess(file_bytes)
+    if kind is None:
+        # Fallback for unknown types - you might want to adjust this logic
+        log.warning("mime_type_detection_failed", reason="Cannot guess file type")
+        detected_mime_type = 'application/octet-stream'
+    else:
+        detected_mime_type = kind.mime
+
+    log.info("mime_type_detected", mime_type=detected_mime_type)
+
 
     if detected_mime_type in SUPPORTED_MIME_TYPES:
         return file_bytes, detected_mime_type
@@ -97,10 +107,10 @@ def upload_resume_to_gemini(resume_info, client):
             tmp_file_path = tmp_file.name
 
         try:
+            # FIX 2: Removed 'mime_type' as it is also an unexpected keyword argument.
+            # The API likely infers the mime type from the file content.
             gemini_file = client.files.upload(
-                file=tmp_file_path,
-                display_name=original_filename,
-                mime_type=final_mime_type
+                file=tmp_file_path
             )
             return gemini_file
         finally:

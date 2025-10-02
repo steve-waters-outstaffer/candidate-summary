@@ -7,7 +7,7 @@ gunicorn==23.0.0
 google-cloud-firestore
 python-docx
 structlog
-python-magic
+filetype
 google-auth==2.36.0
 google-auth-oauthlib==1.2.1
 google-auth-httplib2==0.2.0
