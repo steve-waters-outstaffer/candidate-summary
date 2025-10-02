@@ -37,7 +37,21 @@ export function AuthProvider({ children }) {
     // Login with Google
     async function loginWithGoogle() {
         const provider = new GoogleAuthProvider();
-        return signInWithPopup(auth, provider);
+        // Request Gmail API access for creating drafts
+        provider.addScope('https://www.googleapis.com/auth/gmail.compose');
+        
+        const result = await signInWithPopup(auth, provider);
+        
+        // Get OAuth access token from credential
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        const accessToken = credential?.accessToken;
+        
+        // Store access token for Gmail API calls
+        if (accessToken) {
+            sessionStorage.setItem('google_access_token', accessToken);
+        }
+        
+        return result;
     }
 
     // Logout

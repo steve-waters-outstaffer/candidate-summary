@@ -7,11 +7,12 @@ log = structlog.get_logger()
 SINGLE_CANDIDATE_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'single-candidate-prompts')
 MULTIPLE_CANDIDATES_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'multiple-candidates-prompts')
 
-def get_available_prompts(prompt_category="single"):
+def get_available_prompts(prompt_category="single", prompt_type=None):
     """Scans the specified prompts directory and returns a list of available prompt configurations.
     
     Args:
         prompt_category (str): "single" for single-candidate-prompts or "multiple" for multiple-candidates-prompts
+        prompt_type (str): Optional filter - "email" or "summary" to filter prompts by type
     """
     prompts = []
     
@@ -35,16 +36,20 @@ def get_available_prompts(prompt_category="single"):
                     prompt_id = os.path.splitext(relative_path.replace(os.path.sep, '.'))[0]
                     with open(os.path.join(root, file), 'r', encoding='utf-8') as f:
                         data = json.load(f)
+                        
+                        # Filter by type if specified
+                        if prompt_type and data.get('type') != prompt_type:
+                            continue
+                            
                         prompts.append({
                             'id': prompt_id,
                             'name': data.get('name', prompt_id),
-                            # --- CHANGE 1: Read the sort_order key ---
-                            'sort_order': data.get('sort_order', 999) # Defaults to 999 if key is missing
+                            'type': data.get('type', 'summary'),  # Default to summary if not specified
+                            'sort_order': data.get('sort_order', 999)
                         })
                 except Exception as e:
                     log.error("prompts.loading_failed", file=file, error=str(e))
 
-    # --- CHANGE 2: Sort by the new 'sort_order' key ---
     return sorted(prompts, key=lambda p: p['sort_order'])
 
 def get_prompt(prompt_type="recruitment.detailed", prompt_category="single"):

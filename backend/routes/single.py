@@ -41,6 +41,10 @@ try:
     )
     log.info("routes.single: Successfully imported from helpers.ai_helpers.")
 
+    log.info("routes.single: Importing from helpers.gmail_helpers...")
+    from helpers.gmail_helpers import create_gmail_draft
+    log.info("routes.single: Successfully imported from helpers.gmail_helpers.")
+
 except Exception as e:
     log.error("routes.single: FAILED during import", error=str(e), exc_info=True)
     import sys
@@ -58,7 +62,8 @@ def list_prompts():
     log.info("single.prompts.hit")
     try:
         category = request.args.get('category', 'single')  # Default to single
-        prompts = get_available_prompts(category)
+        prompt_type = request.args.get('type')  # Optional: 'email' or 'summary'
+        prompts = get_available_prompts(category, prompt_type)
         return jsonify(prompts), 200
     except Exception as e:
         log.error("single.prompts.error", error=str(e))
@@ -317,6 +322,34 @@ def push_to_recruitcrm():
 
     except Exception as e:
         log.error("single.push_to_recruitcrm.exception", error=str(e))
+        return jsonify({'error': str(e)}), 500
+
+@single_bp.route('/create-gmail-draft', methods=['POST'])
+def create_gmail_draft_route():
+    """Create a Gmail draft from generated email content"""
+    log.info("single.create_gmail_draft.hit")
+    try:
+        data = request.get_json()
+        user_access_token = data.get('access_token')
+        subject = data.get('subject')
+        html_body = data.get('html_body')
+        to_email = data.get('to_email')  # Optional
+        
+        if not all([user_access_token, subject, html_body]):
+            log.error("single.create_gmail_draft.missing_data")
+            return jsonify({'error': 'Missing required fields: access_token, subject, html_body'}), 400
+        
+        result = create_gmail_draft(user_access_token, subject, html_body, to_email)
+        
+        if result['success']:
+            log.info("single.create_gmail_draft.success", draft_id=result['draft_id'])
+            return jsonify(result), 200
+        else:
+            log.error("single.create_gmail_draft.failed", error=result.get('error'))
+            return jsonify({'error': result.get('error', 'Failed to create Gmail draft')}), 500
+            
+    except Exception as e:
+        log.error("single.create_gmail_draft.exception", error=str(e))
         return jsonify({'error': str(e)}), 500
 
 @single_bp.route('/log-feedback', methods=['POST'])

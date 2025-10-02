@@ -29,6 +29,7 @@ import {
     ThumbUp,
     ThumbDown
 } from '@mui/icons-material';
+import { useAuth } from '../contexts/AuthContext';
 
 // --- Placeholder values for theme ---
 const CustomColors = {
@@ -45,6 +46,7 @@ const Spacing = { Large: 3, Medium: 2, Small: 1, Default: 1 };
 // --- END ---
 
 const CandidateSummaryGenerator = () => {
+    const { loginWithGoogle } = useAuth();
     const [formData, setFormData] = useState({
         candidate_slug: '',
         job_slug: '',
@@ -67,6 +69,14 @@ const CandidateSummaryGenerator = () => {
 
     const [prompts, setPrompts] = useState([]);
     const [selectedPrompt, setSelectedPrompt] = useState('');
+    
+    // Email draft feature state
+    const [createEmailDraft, setCreateEmailDraft] = useState(false);
+    const [emailPrompts, setEmailPrompts] = useState([]);
+    const [selectedEmailPrompt, setSelectedEmailPrompt] = useState('');
+    const [generatedEmailHtml, setGeneratedEmailHtml] = useState('');
+    const [creatingDraft, setCreatingDraft] = useState(false);
+    const [draftUrl, setDraftUrl] = useState('');
 
     const [generatedHtml, setGeneratedHtml] = useState('');
     const [loading, setLoading] = useState(false);
@@ -87,13 +97,23 @@ const CandidateSummaryGenerator = () => {
         const fetchPrompts = async () => {
             if (!API_BASE_URL) return;
             try {
-                const response = await fetch(`${API_BASE_URL}/api/prompts`);
-                if (!response.ok) throw new Error('Failed to fetch prompts');
-                const data = await response.json();
-                setPrompts(data);
-                if (data.length > 0) {
-                    const defaultPrompt = data.find(p => p.id === 'recruitment.detailed') || data[0];
+                // Fetch summary prompts
+                const summaryResponse = await fetch(`${API_BASE_URL}/api/prompts?type=summary`);
+                if (!summaryResponse.ok) throw new Error('Failed to fetch summary prompts');
+                const summaryData = await summaryResponse.json();
+                setPrompts(summaryData);
+                if (summaryData.length > 0) {
+                    const defaultPrompt = summaryData.find(p => p.id === 'recruitment.detailed-v2') || summaryData[0];
                     setSelectedPrompt(defaultPrompt.id);
+                }
+                
+                // Fetch email prompts
+                const emailResponse = await fetch(`${API_BASE_URL}/api/prompts?type=email`);
+                if (!emailResponse.ok) throw new Error('Failed to fetch email prompts');
+                const emailData = await emailResponse.json();
+                setEmailPrompts(emailData);
+                if (emailData.length > 0) {
+                    setSelectedEmailPrompt(emailData[0].id);
                 }
             } catch (error) {
                 showAlert('error', `Could not load summary types: ${error.message}`);
@@ -196,11 +216,14 @@ const CandidateSummaryGenerator = () => {
             fireflies_url: ''
         });
         setGeneratedHtml('');
+        setGeneratedEmailHtml('');
+        setDraftUrl('');
         setFeedbackSubmitted(false);
         setShowFeedbackComment(false);
         setFeedbackComment('');
         setIncludeFireflies(false);
         setProceedWithoutInterview(false);
+        setCreateEmailDraft(false);
     };
 
     const getStatusIcon = (status) => {
@@ -246,31 +269,68 @@ const CandidateSummaryGenerator = () => {
             showAlert('error', 'Please select a summary type.');
             return;
         }
+        if (createEmailDraft && !selectedEmailPrompt) {
+            showAlert('error', 'Please select an email template.');
+            return;
+        }
+        
         setLoading(true);
         setFeedbackSubmitted(false);
         setShowFeedbackComment(false);
         setFeedbackComment('');
+        setDraftUrl('');
+        
         try {
-            const payload = { ...formData, prompt_type: selectedPrompt };
+            const basePayload = { ...formData };
             if (!includeFireflies) {
-                delete payload.fireflies_url;
+                delete basePayload.fireflies_url;
             }
             if (proceedWithoutInterview) {
-                delete payload.interview_id;
-                delete payload.alpharun_job_id;
+                delete basePayload.interview_id;
+                delete basePayload.alpharun_job_id;
             }
-            const response = await fetch(`${API_BASE_URL}/api/generate-summary`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await response.json();
-            if (data.success) {
-                setGeneratedHtml(data.html_summary);
+
+            // Generate summary (and optionally email) in parallel
+            const requests = [
+                fetch(`${API_BASE_URL}/api/generate-summary`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...basePayload, prompt_type: selectedPrompt })
+                })
+            ];
+
+            if (createEmailDraft) {
+                requests.push(
+                    fetch(`${API_BASE_URL}/api/generate-summary`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...basePayload, prompt_type: selectedEmailPrompt })
+                    })
+                );
+            }
+
+            const responses = await Promise.all(requests);
+            const [summaryResponse, emailResponse] = responses;
+            
+            const summaryData = await summaryResponse.json();
+            if (summaryData.success) {
+                setGeneratedHtml(summaryData.html_summary);
                 showAlert('success', 'Summary generated successfully!');
             } else {
-                showAlert('error', data.error || 'Failed to generate summary');
+                showAlert('error', summaryData.error || 'Failed to generate summary');
+                setLoading(false);
+                return;
             }
+
+            if (createEmailDraft && emailResponse) {
+                const emailData = await emailResponse.json();
+                if (emailData.success) {
+                    setGeneratedEmailHtml(emailData.html_summary);
+                } else {
+                    showAlert('warning', 'Summary generated but email failed: ' + (emailData.error || 'Unknown error'));
+                }
+            }
+            
         } catch (error) {
             showAlert('error', 'Network error: ' + error.message);
         } finally {
@@ -308,6 +368,73 @@ const CandidateSummaryGenerator = () => {
             showAlert('error', 'Network error: ' + error.message);
         } finally {
             setPushing(false);
+        }
+    };
+
+    const createGmailDraft = async () => {
+        if (!API_BASE_URL) return;
+
+        if (!generatedEmailHtml) {
+            showAlert('error', 'No email content to create draft');
+            return;
+        }
+
+        // Check for existing access token
+        let accessToken = sessionStorage.getItem('google_access_token');
+        
+        // If no token, prompt user to re-authenticate with Gmail scope
+        if (!accessToken) {
+            try {
+                showAlert('info', 'Requesting Gmail permissions...');
+                await loginWithGoogle();
+                accessToken = sessionStorage.getItem('google_access_token');
+                
+                if (!accessToken) {
+                    showAlert('error', 'Failed to get Gmail permissions. Please try again.');
+                    return;
+                }
+            } catch (error) {
+                showAlert('error', 'Failed to authenticate with Google: ' + error.message);
+                return;
+            }
+        }
+
+        // Extract candidate name and job title for subject
+        const candidateName = apiStatus.candidate.data?.candidate_name || 'Candidate';
+        const jobTitle = apiStatus.job.data?.job_name || 'Position';
+        const subject = `${candidateName} - ${jobTitle}`;
+
+        setCreatingDraft(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/create-gmail-draft`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    access_token: accessToken,
+                    subject: subject,
+                    html_body: generatedEmailHtml,
+                    to_email: '' // Leave blank for user to fill
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                setDraftUrl(data.draft_url);
+                showAlert('success', 'Gmail draft created successfully!');
+            } else {
+                // If token expired, clear it and ask user to try again
+                if (data.error?.includes('invalid') || data.error?.includes('expired')) {
+                    sessionStorage.removeItem('google_access_token');
+                    showAlert('error', 'Gmail session expired. Please click "Create Draft" again to re-authenticate.');
+                } else {
+                    showAlert('error', data.error || 'Failed to create Gmail draft');
+                }
+            }
+        } catch (error) {
+            showAlert('error', 'Network error: ' + error.message);
+        } finally {
+            setCreatingDraft(false);
         }
     };
 
@@ -406,6 +533,32 @@ const CandidateSummaryGenerator = () => {
                                     {prompts.map((prompt) => (<MenuItem key={prompt.id} value={prompt.id}>{prompt.name}</MenuItem>))}
                                 </Select>
                             </FormControl>
+                            
+                            <Divider sx={{ my: Spacing.Medium }} />
+                            
+                            <FormControlLabel 
+                                control={<Switch checked={createEmailDraft} onChange={(e) => setCreateEmailDraft(e.target.checked)} name="createEmailDraft" />} 
+                                label="Create Email Draft in Gmail" 
+                                sx={{ mb: Spacing.Small }} 
+                            />
+                            
+                            <Collapse in={createEmailDraft}>
+                                <FormControl fullWidth sx={{ mb: Spacing.Large }}>
+                                    <InputLabel id="email-prompt-select-label">Email Template</InputLabel>
+                                    <Select 
+                                        labelId="email-prompt-select-label" 
+                                        value={selectedEmailPrompt} 
+                                        label="Email Template" 
+                                        onChange={(e) => setSelectedEmailPrompt(e.target.value)} 
+                                        disabled={emailPrompts.length === 0}
+                                    >
+                                        {emailPrompts.map((prompt) => (
+                                            <MenuItem key={prompt.id} value={prompt.id}>{prompt.name}</MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
+                            </Collapse>
+                            
                             <Box sx={{ display: 'flex', gap: Spacing.Default, alignItems: 'center', flexWrap: 'wrap' }}>
                                 <Button variant="contained" onClick={generateSummary} disabled={isGenerateDisabled}>{loading ? <CircularProgress size={24} /> : 'Generate Summary'}</Button>
                                 <Button variant="text" startIcon={<Refresh />} onClick={resetApiStatus}>Reset</Button>
@@ -417,14 +570,27 @@ const CandidateSummaryGenerator = () => {
                     {generatedHtml && (
                         <Card>
                             <CardContent>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: Spacing.Medium }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: Spacing.Medium, flexWrap: 'wrap', gap: 1 }}>
                                     <Typography variant="h4">
                                         Candidate Ai Summary
                                     </Typography>
-                                    <Button variant="contained" color="success" onClick={pushToRecruitCRM} disabled={pushing}>
-                                        {pushing ? <CircularProgress size={24} /> : 'Push to RecruitCRM'}
-                                    </Button>
+                                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                        <Button variant="contained" color="success" onClick={pushToRecruitCRM} disabled={pushing}>
+                                            {pushing ? <CircularProgress size={24} /> : 'Push to RecruitCRM'}
+                                        </Button>
+                                        {generatedEmailHtml && (
+                                            <Button variant="contained" color="primary" onClick={createGmailDraft} disabled={creatingDraft}>
+                                                {creatingDraft ? <CircularProgress size={24} /> : 'Create Draft in Gmail'}
+                                            </Button>
+                                        )}
+                                    </Box>
                                 </Box>
+                                
+                                {draftUrl && (
+                                    <Alert severity="success" sx={{ mb: 2 }}>
+                                        Gmail draft created! <a href={draftUrl} target="_blank" rel="noopener noreferrer">Open in Gmail</a>
+                                    </Alert>
+                                )}
 
                                 <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
                                     <Tabs value={view} onChange={handleViewChange} aria-label="summary view tabs">

@@ -93,11 +93,9 @@ for key in required_keys:
 
 # --- Configure Google Gemini ---
 try:
-    from google.genai.types import HttpOptions
     GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
     client = genai.Client(
-        api_key=GOOGLE_API_KEY,
-        http_options=HttpOptions(api_version="v1")
+        api_key=GOOGLE_API_KEY
     )
     app.client = client  # Attach client to app context
     log.info("google_gemini.configured")

@@ -1,9 +1,11 @@
 // src/components/auth/Login.jsx
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { loginUser, signInWithGoogle, resetPassword } from '../../services/authService';
+import { useAuth } from '../../contexts/AuthContext';
+import { resetPassword } from '../../services/authService';
 
 const Login = ({ onLoginSuccess }) => {
+    const { login, loginWithGoogle } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState(null);
@@ -16,8 +18,8 @@ const Login = ({ onLoginSuccess }) => {
         setError(null);
 
         try {
-            const user = await loginUser(email, password);
-            if (onLoginSuccess) onLoginSuccess(user);
+            await login(email, password);
+            if (onLoginSuccess) onLoginSuccess();
         } catch (err) {
             setError(err.message.replace('Firebase: ', ''));
         } finally {
@@ -30,8 +32,8 @@ const Login = ({ onLoginSuccess }) => {
         setError(null);
 
         try {
-            const user = await signInWithGoogle();
-            if (onLoginSuccess) onLoginSuccess(user);
+            await loginWithGoogle();
+            if (onLoginSuccess) onLoginSuccess();
         } catch (err) {
             setError(err.message.replace('Firebase: ', ''));
         } finally {
