@@ -3,7 +3,7 @@ import {
     Box, Card, CardContent, TextField, Button, Typography, Alert, CircularProgress,
     FormControl, InputLabel, Select, MenuItem, FormGroup, FormControlLabel, Switch,
     Stepper, Step, StepLabel, Grid, Paper, Accordion, AccordionSummary, AccordionDetails,
-    Divider, List, ListItem, ListItemIcon, ListItemText
+    Divider, List, ListItem, ListItemIcon, ListItemText, Collapse
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -11,9 +11,11 @@ import ErrorIcon from '@mui/icons-material/Error';
 import DescriptionIcon from '@mui/icons-material/Description';
 import MicIcon from '@mui/icons-material/Mic';
 import { debounce } from 'lodash';
+import { useAuth } from '../contexts/AuthContext';
 
 // Updated component signature to accept props from Dashboard
 const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
+    const { loginWithGoogle } = useAuth();
     const [jobUrl, setJobUrl] = useState('');
     const [clientName, setClientName] = useState('');
     const [outstafferJobUrl, setOutstafferJobUrl] = useState('');
@@ -23,6 +25,11 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
     const [multiCandidatePrompt, setMultiCandidatePrompt] = useState('');
     const [availablePrompts, setAvailablePrompts] = useState({ single: [], multiple: [] });
     const [alert, setAlert] = useState({ show: false, type: 'info', message: '' });
+    
+    // Email generation state
+    const [generateEmail, setGenerateEmail] = useState(false);
+    const [creatingDraft, setCreatingDraft] = useState(false);
+    const [draftUrl, setDraftUrl] = useState('');
 
     // Loading States
     const [stagesLoading, setStagesLoading] = useState(false);
@@ -251,6 +258,71 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
         }
     };
 
+    // --- Create Gmail Draft ---
+    const createGmailDraft = async () => {
+        if (!jobStatus?.email_html) {
+            showAlert('error', 'No email content available to create draft.');
+            return;
+        }
+
+        // Check if we have a valid access token
+        let accessToken = sessionStorage.getItem('google_access_token');
+        
+        if (!accessToken) {
+            // Need to authenticate with Google first
+            try {
+                showAlert('info', 'Requesting Gmail permissions...');
+                const result = await loginWithGoogle();
+                accessToken = result.accessToken;
+                
+                if (!accessToken) {
+                    showAlert('error', 'Failed to get Gmail permissions. Please try again.');
+                    return;
+                }
+            } catch (error) {
+                showAlert('error', 'Failed to authenticate with Google: ' + error.message);
+                return;
+            }
+        }
+
+        // Extract job title for subject
+        const jobTitle = jobName || 'Position';
+        const subject = `Candidate Submissions - ${jobTitle}`;
+
+        setCreatingDraft(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/create-bulk-gmail-draft`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    access_token: accessToken,
+                    subject: subject,
+                    html_body: jobStatus.email_html,
+                    to_email: '' // Leave blank for user to fill
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                setDraftUrl(data.draft_url);
+                showAlert('success', 'Gmail draft created successfully!');
+            } else {
+                // If token expired, clear it and ask user to try again
+                if (data.error?.includes('invalid') || data.error?.includes('expired')) {
+                    sessionStorage.removeItem('google_access_token');
+                    showAlert('error', 'Gmail session expired. Please click "Create Draft" again to re-authenticate.');
+                } else {
+                    showAlert('error', data.error || 'Failed to create Gmail draft');
+                }
+            }
+        } catch (error) {
+            showAlert('error', 'Network error: ' + error.message);
+        } finally {
+            setCreatingDraft(false);
+        }
+    };
+
     // --- Step 5: Send to RecruitCRM ---
     const handleSendToRecruitCRM = async (candidateSlug) => {
         showAlert('info', `Sending ${getCandidateName(candidateSlug)} to RecruitCRM...`);
@@ -313,25 +385,36 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
                         )}
 
                         <Divider sx={{ my: 2 }} />
-                        <Typography variant="subtitle1" sx={{mb: 1, fontWeight: 'bold'}}>Email Customization</Typography>
-                        <TextField label="Client Name" value={clientName} onChange={(e) => setClientName(e.target.value)} fullWidth sx={{ mb: 2 }} disabled={processingLoading} />
-                        <TextField label="Outstaffer Platform Job URL" value={outstafferJobUrl} onChange={(e) => setOutstafferJobUrl(e.target.value)} fullWidth sx={{ mb: 2 }} disabled={processingLoading} />
-
-                        <Divider sx={{ my: 2 }} />
-                        <Typography variant="subtitle1" sx={{mb: 1, fontWeight: 'bold'}}>Prompt Selection</Typography>
+                        <Typography variant="subtitle1" sx={{mb: 1, fontWeight: 'bold'}}>Individual Summary Prompt</Typography>
                         <FormControl fullWidth sx={{ mb: 2 }}>
-                            <InputLabel>Individual Summary Prompt</InputLabel>
-                            <Select value={singleCandidatePrompt} onChange={(e) => setSingleCandidatePrompt(e.target.value)} label="Individual Summary Prompt" disabled={processingLoading}>
+                            <InputLabel>Summary Prompt</InputLabel>
+                            <Select value={singleCandidatePrompt} onChange={(e) => setSingleCandidatePrompt(e.target.value)} label="Summary Prompt" disabled={processingLoading}>
                                 {availablePrompts.single.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
                             </Select>
                         </FormControl>
 
-                        <FormControl fullWidth sx={{ mb: 2 }}>
-                            <InputLabel>Multi-Candidate Email Prompt</InputLabel>
-                            <Select value={multiCandidatePrompt} onChange={(e) => setMultiCandidatePrompt(e.target.value)} label="Multi-Candidate Email Prompt" disabled={processingLoading}>
-                                {availablePrompts.multiple.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
-                            </Select>
-                        </FormControl>
+                        <Divider sx={{ my: 2 }} />
+                        
+                        <FormControlLabel 
+                            control={<Switch checked={generateEmail} onChange={(e) => setGenerateEmail(e.target.checked)} name="generateEmail" />} 
+                            label="Generate Email" 
+                            sx={{ mb: 1 }} 
+                        />
+                        
+                        <Collapse in={generateEmail}>
+                            <Box sx={{ mt: 2 }}>
+                                <Typography variant="subtitle1" sx={{mb: 1, fontWeight: 'bold'}}>Email Customization</Typography>
+                                <TextField label="Client Name" value={clientName} onChange={(e) => setClientName(e.target.value)} fullWidth sx={{ mb: 2 }} disabled={processingLoading} />
+                                <TextField label="Outstaffer Platform Job URL" value={outstafferJobUrl} onChange={(e) => setOutstafferJobUrl(e.target.value)} fullWidth sx={{ mb: 2 }} disabled={processingLoading} />
+                                
+                                <FormControl fullWidth sx={{ mb: 2 }}>
+                                    <InputLabel>Multi-Candidate Email Prompt</InputLabel>
+                                    <Select value={multiCandidatePrompt} onChange={(e) => setMultiCandidatePrompt(e.target.value)} label="Multi-Candidate Email Prompt" disabled={processingLoading}>
+                                        {availablePrompts.multiple.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+                                    </Select>
+                                </FormControl>
+                            </Box>
+                        </Collapse>
 
                         <Button variant="contained" color="primary" onClick={handleBulkProcess} disabled={processingLoading || totalSelected === 0} fullWidth sx={{ mt: 2 }}>
                             {processingLoading ? <CircularProgress size={24} /> : `Process ${totalSelected} Candidates`}
@@ -359,7 +442,7 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
 
                                 {jobStatus.status === 'complete' && (
                                     <Box sx={{display: 'flex', gap: 2, mb: 2}}>
-                                        {!jobStatus.email_html && (
+                                        {generateEmail && !jobStatus.email_html && (
                                             <Button variant="contained" color="secondary" onClick={handleGenerateEmail} disabled={emailLoading} fullWidth>
                                                 {emailLoading ? <CircularProgress size={24} /> : 'Generate Final Email'}
                                             </Button>
@@ -371,16 +454,40 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
                                 )}
 
                                 {jobStatus.email_html && (
-                                    <Accordion defaultExpanded>
-                                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                            <Typography variant="h6">Generated Email</Typography>
-                                        </AccordionSummary>
-                                        <AccordionDetails>
-                                            <Paper elevation={0} variant="outlined" sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
-                                                <Box dangerouslySetInnerHTML={{ __html: jobStatus.email_html }} />
-                                            </Paper>
-                                        </AccordionDetails>
-                                    </Accordion>
+                                    <>
+                                        <Accordion defaultExpanded>
+                                            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                                <Typography variant="h6">Generated Email</Typography>
+                                            </AccordionSummary>
+                                            <AccordionDetails>
+                                                <Paper elevation={0} variant="outlined" sx={{ p: 2, maxHeight: 400, overflow: 'auto', mb: 2 }}>
+                                                    <Box dangerouslySetInnerHTML={{ __html: jobStatus.email_html }} />
+                                                </Paper>
+                                                <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+                                                    <Button 
+                                                        variant="contained" 
+                                                        color="primary" 
+                                                        onClick={createGmailDraft} 
+                                                        disabled={creatingDraft}
+                                                        fullWidth
+                                                    >
+                                                        {creatingDraft ? <CircularProgress size={24} /> : 'Create Draft in Gmail'}
+                                                    </Button>
+                                                    {draftUrl && (
+                                                        <Button 
+                                                            variant="outlined" 
+                                                            color="primary" 
+                                                            href={draftUrl} 
+                                                            target="_blank"
+                                                            fullWidth
+                                                        >
+                                                            Open Draft
+                                                        </Button>
+                                                    )}
+                                                </Box>
+                                            </AccordionDetails>
+                                        </Accordion>
+                                    </>
                                 )}
 
                                 <Divider sx={{ my: 2 }} />

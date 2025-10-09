@@ -20,6 +20,7 @@ from helpers.ai_helpers import (
     upload_resume_to_gemini,
     generate_html_summary
 )
+from helpers.gmail_helpers import create_gmail_draft
 from config.prompts import build_full_prompt
 # In-memory job store. For a production environment, you might replace this
 # with a more persistent store like Redis or Firestore.
@@ -347,4 +348,45 @@ def generate_bulk_email():
 
     except Exception as e:
         log.error("bulk.generate_bulk_email.error", job_id=job_id, error=str(e))
+        return jsonify({'error': str(e)}), 500
+
+@bulk_bp.route('/create-bulk-gmail-draft', methods=['POST'])
+def create_bulk_gmail_draft():
+    """Create a Gmail draft from generated bulk email content"""
+    log.info("bulk.create_bulk_gmail_draft.hit")
+    try:
+        data = request.get_json()
+        user_access_token = data.get('access_token')
+        subject = data.get('subject')
+        html_body = data.get('html_body')
+        to_email = data.get('to_email')  # Optional
+        
+        # Get refresh credentials for automatic token refresh
+        refresh_token = data.get('refresh_token')
+        client_id = data.get('client_id')
+        client_secret = data.get('client_secret')
+        
+        if not all([user_access_token, subject, html_body]):
+            log.error("bulk.create_bulk_gmail_draft.missing_data")
+            return jsonify({'error': 'Missing required fields: access_token, subject, html_body'}), 400
+        
+        result = create_gmail_draft(
+            user_access_token, 
+            subject, 
+            html_body, 
+            to_email,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret
+        )
+        
+        if result['success']:
+            log.info("bulk.create_bulk_gmail_draft.success", draft_id=result['draft_id'])
+            return jsonify(result), 200
+        else:
+            log.error("bulk.create_bulk_gmail_draft.failed", error=result.get('error'))
+            return jsonify({'error': result.get('error', 'Failed to create Gmail draft')}), 500
+            
+    except Exception as e:
+        log.error("bulk.create_bulk_gmail_draft.exception", error=str(e))
         return jsonify({'error': str(e)}), 500

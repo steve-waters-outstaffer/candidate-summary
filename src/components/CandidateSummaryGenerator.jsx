@@ -399,12 +399,14 @@ const CandidateSummaryGenerator = () => {
             }
         }
 
-        // Extract candidate name and job title for subject
+        // Extract candidate name and job title for subject and filename
         const candidateName = apiStatus.candidate.data?.candidate_name || 'Candidate';
         const jobTitle = apiStatus.job.data?.job_name || 'Position';
         const subject = `${candidateName} - ${jobTitle}`;
+        const pdfFilename = `${candidateName}-${jobTitle}.pdf`;
 
         setCreatingDraft(true);
+
         try {
             const response = await fetch(`${API_BASE_URL}/api/create-gmail-draft`, {
                 method: 'POST',
@@ -413,7 +415,9 @@ const CandidateSummaryGenerator = () => {
                     access_token: accessToken,
                     subject: subject,
                     html_body: generatedEmailHtml,
-                    to_email: '' // Leave blank for user to fill
+                    to_email: '', // Leave blank for user to fill
+                    summary_html: generatedHtml, // Send summary HTML for PDF generation
+                    pdf_filename: pdfFilename
                 })
             });
 
@@ -421,7 +425,11 @@ const CandidateSummaryGenerator = () => {
 
             if (data.success) {
                 setDraftUrl(data.draft_url);
-                showAlert('success', 'Gmail draft created successfully!');
+                if (data.pdf_generated === false) {
+                    showAlert('warning', 'Gmail draft created, but PDF attachment failed to generate.');
+                } else {
+                    showAlert('success', 'Gmail draft created successfully with PDF attachment!');
+                }
             } else {
                 // If token expired, clear it and ask user to try again
                 if (data.error?.includes('invalid') || data.error?.includes('expired')) {

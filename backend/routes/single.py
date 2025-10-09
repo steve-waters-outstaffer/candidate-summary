@@ -335,14 +335,33 @@ def create_gmail_draft_route():
         html_body = data.get('html_body')
         to_email = data.get('to_email')  # Optional
         
+        # Get refresh credentials for automatic token refresh
+        refresh_token = data.get('refresh_token')
+        client_id = data.get('client_id')
+        client_secret = data.get('client_secret')
+        
+        # Get summary HTML for PDF generation
+        summary_html = data.get('summary_html')
+        pdf_filename = data.get('pdf_filename')
+        
         if not all([user_access_token, subject, html_body]):
             log.error("single.create_gmail_draft.missing_data")
             return jsonify({'error': 'Missing required fields: access_token, subject, html_body'}), 400
         
-        result = create_gmail_draft(user_access_token, subject, html_body, to_email)
+        result = create_gmail_draft(
+            user_access_token, 
+            subject, 
+            html_body, 
+            to_email,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            summary_html=summary_html,
+            pdf_filename=pdf_filename
+        )
         
         if result['success']:
-            log.info("single.create_gmail_draft.success", draft_id=result['draft_id'])
+            log.info("single.create_gmail_draft.success", draft_id=result['draft_id'], pdf_generated=result.get('pdf_generated', False))
             return jsonify(result), 200
         else:
             log.error("single.create_gmail_draft.failed", error=result.get('error'))
