@@ -64,6 +64,28 @@ Push generated summary to RecruitCRM candidate record.
 }
 ```
 
+### POST `/api/webhooks/recruitcrm`
+Accept webhook callbacks from RecruitCRM when a candidate advances to Stage 3.
+
+**Request:**
+```json
+{
+  "event": "stage.moved",
+  "data": {
+    "candidate_slug": "candidate-123",
+    "job_slug": "job-456",
+    "stage": {
+      "id": 3,
+      "name": "Stage 3"
+    }
+  }
+}
+```
+
+- The server immediately acknowledges the request with `{ "status": "accepted" }` and HTTP `200`.
+- Processing continues asynchronously: the worker reuses the single-candidate summary pipeline, appends an automated Stage 3 note, and updates the candidate record via `push_to_recruitcrm_internal`.
+- Payloads missing Stage 3 context are acknowledged but skipped after logging.
+
 ## Deployment
 
 For production deployment to Google Cloud Run:
