@@ -1,10 +1,15 @@
 FROM python:3.11-slim
 
-# Install system dependencies for python-magic
+# Install system dependencies for python-magic and build tools for pycairo
 RUN apt-get update && apt-get install -y \
     libmagic1 \
     libmagic-dev \
     file \
+    gcc \
+    build-essential \
+    libcairo2-dev \
+    pkg-config \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
