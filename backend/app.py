@@ -131,12 +131,17 @@ try:
     from routes.bulk import bulk_bp
     log.info("Successfully imported routes.bulk.")
 
+    log.info("Importing routes.webhooks...")
+    from routes.webhooks import webhooks_bp
+    log.info("Successfully imported routes.webhooks.")
+
     log.info("blueprints_imported")
 
     log.info("registering_blueprints")
     app.register_blueprint(single_bp, url_prefix='/api')
     app.register_blueprint(multi_bp, url_prefix='/api')
     app.register_blueprint(bulk_bp, url_prefix='/api')
+    app.register_blueprint(webhooks_bp, url_prefix='/api')
     log.info("blueprints_registered")
 
 except Exception as e:

@@ -1,0 +1,52 @@
+# Directories to exclude
+Junk files/
+Webhook/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+docs/
+README.md
+
+# Tests
+tests/
+test/
+*.test.js
+*.spec.js
+
+# Environment (if you inject these separately)
+.env.local
+.env.development
+
+# Any other local dev stuff
+scratch/
+temp/
+tmp/
