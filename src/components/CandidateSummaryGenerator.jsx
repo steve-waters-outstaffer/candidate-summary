@@ -64,6 +64,7 @@ const CandidateSummaryGenerator = () => {
         job: { status: 'pending', message: '', data: null },
         interview: { status: 'pending', message: '', data: null },
         fireflies: { status: 'pending', message: '', data: null },
+        quil: { status: 'pending', message: '', data: null },
         resume: { status: 'pending', message: '', data: null }
     });
 
@@ -84,6 +85,7 @@ const CandidateSummaryGenerator = () => {
     const [alert, setAlert] = useState({ show: false, type: 'info', message: '' });
     const [view, setView] = useState('preview');
     const [includeFireflies, setIncludeFireflies] = useState(false);
+    const [useQuil, setUseQuil] = useState(false);
     const [proceedWithoutInterview, setProceedWithoutInterview] = useState(false);
 
 
@@ -197,12 +199,69 @@ const CandidateSummaryGenerator = () => {
         testApi('fireflies', { transcript_url: firefliesUrl });
     };
 
+    const handleQuilTest = async () => {
+        if (!formData.candidate_slug || !formData.job_slug) {
+            showAlert('error', 'Please confirm candidate and job first.');
+            return;
+        }
+        
+        if (!API_BASE_URL) return;
+        
+        setApiStatus(prev => ({ ...prev, quil: { status: 'loading', message: 'Searching for Quil notes...', data: null } }));
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/test-quil`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    candidate_slug: formData.candidate_slug,
+                    job_slug: formData.job_slug
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                setApiStatus(prev => ({ 
+                    ...prev, 
+                    quil: { 
+                        status: 'success', 
+                        message: `Found: ${data.matched_note?.job_title || 'Matched interview'}`, 
+                        data: data 
+                    } 
+                }));
+                showAlert('success', 'Quil interview note found and matched!');
+            } else {
+                setApiStatus(prev => ({ 
+                    ...prev, 
+                    quil: { 
+                        status: 'error', 
+                        message: data.error || 'No Quil notes found', 
+                        data: null 
+                    } 
+                }));
+                showAlert('error', data.error || 'No Quil interview notes found for this candidate/job');
+            }
+        } catch (error) {
+            setApiStatus(prev => ({ 
+                ...prev, 
+                quil: { 
+                    status: 'error', 
+                    message: 'Network error', 
+                    data: null 
+                } 
+            }));
+            showAlert('error', `Network error: ${error.message}`);
+        }
+    };
+
     const resetApiStatus = () => {
         setApiStatus({
             candidate: { status: 'pending', message: '', data: null },
             job: { status: 'pending', message: '', data: null },
             interview: { status: 'pending', message: '', data: null },
             fireflies: { status: 'pending', message: '', data: null },
+            quil: { status: 'pending', message: '', data: null },
             resume: { status: 'pending', message: '', data: null }
         });
         setRecruitCrmUrl('');
@@ -222,6 +281,7 @@ const CandidateSummaryGenerator = () => {
         setShowFeedbackComment(false);
         setFeedbackComment('');
         setIncludeFireflies(false);
+        setUseQuil(false);
         setProceedWithoutInterview(false);
         setCreateEmailDraft(false);
     };
@@ -289,6 +349,9 @@ const CandidateSummaryGenerator = () => {
                 delete basePayload.interview_id;
                 delete basePayload.alpharun_job_id;
             }
+            
+            // Add use_quil flag to payload
+            basePayload.use_quil = useQuil;
 
             // Generate summary (and optionally email) in parallel
             const requests = [
@@ -533,6 +596,36 @@ const CandidateSummaryGenerator = () => {
                                     </Box>
                                 </Box>
                             </Collapse>
+                            
+                            <Divider sx={{ my: Spacing.Medium }} />
+                            
+                            <FormControlLabel 
+                                control={<Switch checked={useQuil} onChange={(e) => setUseQuil(e.target.checked)} name="useQuil" />} 
+                                label="Use Quil Interview Notes" 
+                                sx={{ mb: Spacing.Small }} 
+                            />
+                            <Collapse in={useQuil}>
+                                <Box sx={{ mb: Spacing.Medium, mt: Spacing.Small }}>
+                                    <Button 
+                                        fullWidth 
+                                        variant="outlined" 
+                                        onClick={handleQuilTest} 
+                                        disabled={!formData.candidate_slug || !formData.job_slug}
+                                    >
+                                        Test Quil Notes
+                                    </Button>
+                                </Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, border: '1px solid #eee', borderRadius: 1, mb: Spacing.Medium }}>
+                                    <Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Quil Interview:</Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        {getStatusIcon(apiStatus.quil.status)}
+                                        <Typography variant="body2" sx={{ color: getStatusColor(apiStatus.quil.status) }}>
+                                            {apiStatus.quil.data?.matched_note?.job_title || apiStatus.quil.message || 'Pending Test'}
+                                        </Typography>
+                                    </Box>
+                                </Box>
+                            </Collapse>
+                            
                             <Divider sx={{ my: Spacing.Medium }} />
                             <TextField fullWidth multiline rows={4} label="Additional Context (Optional)" name="additional_context" value={formData.additional_context} onChange={handleInputChange} sx={{ mb: Spacing.Medium }} />
                             <FormControl fullWidth sx={{ mb: Spacing.Large }}>

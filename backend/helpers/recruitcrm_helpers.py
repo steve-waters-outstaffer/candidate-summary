@@ -154,3 +154,27 @@ def fetch_alpharun_interview(job_opening_id, interview_id):
     except requests.exceptions.RequestException as e:
         log.error("alpharun.fetch_interview.failed", interview_id=interview_id, error=str(e))
         return None
+
+def fetch_candidate_notes(candidate_slug):
+    """Fetches all notes for a candidate from RecruitCRM."""
+    log.info("recruitcrm.fetch_candidate_notes.called", candidate_slug=candidate_slug)
+    url = 'https://api.recruitcrm.io/v1/notes/search'
+    params = {
+        'related_to': candidate_slug,
+        'related_to_type': 'candidate'
+
+    }
+    try:
+        response = requests.get(url, headers=get_recruitcrm_headers(), params=params)
+        response.raise_for_status()
+        data = response.json()
+        notes = data.get('data', [])
+        log.info("recruitcrm.fetch_candidate_notes.success", 
+                 candidate_slug=candidate_slug, 
+                 note_count=len(notes))
+        return notes
+    except requests.exceptions.RequestException as e:
+        log.error("recruitcrm.fetch_candidate_notes.failed", 
+                 candidate_slug=candidate_slug, 
+                 error=str(e))
+        return []

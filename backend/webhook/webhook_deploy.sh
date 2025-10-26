@@ -1,26 +1,34 @@
 #!/bin/bash
 
-# Deployment script for the isolated webhook listener function (Google Cloud Functions)
+# Deployment script for the webhook listener function with Cloud Tasks support
 set -e
 
 # --- Configuration ---
 PROJECT_ID="candidate-summary-ai"
 FUNCTION_NAME="recruitcrm-webhook-listener"
 REGION="us-central1"
-RUNTIME="python312"  # Use a modern, supported runtime
-ENTRY_POINT="webhook_listener" # <--- **CHANGE THIS**    # Name of the Flask application instance (or the function that handles the request)
-SOURCE_DIR="webhook-listener" # Directory containing your Python function code
+RUNTIME="python312"
+ENTRY_POINT="webhook_listener"
+SOURCE_DIR="webhook-listener"
 ACCOUNT_EMAIL="steve.waters@outstaffer.com"
+
+# Cloud Tasks Configuration
+CLOUD_TASKS_QUEUE="candidate-summary-queue"
+CLOUD_TASKS_LOCATION="us-central1"
+
+# IMPORTANT: Set this to your worker function URL after creating it in Phase 2
+# For now, use a placeholder - update after Phase 2
+WORKER_FUNCTION_URL="https://REPLACE-WITH-WORKER-URL-AFTER-PHASE-2"
+
 # ---------------------
 
-echo "🚀 Starting deployment for single webhook function..."
+echo "🚀 Starting deployment for webhook listener function..."
 
-# --- Setup and Authentication (Same as your main script, for consistency) ---
-
+# --- Setup and Authentication ---
 echo "🔐 Setting Google account to $ACCOUNT_EMAIL..."
 gcloud config set account $ACCOUNT_EMAIL
 
-# Check if we need to authenticate (optional, but good practice)
+# Check if we need to authenticate
 if ! gcloud auth list --filter="status:ACTIVE" --format="value(account)" | grep -q "$ACCOUNT_EMAIL"; then
     echo "🔑 Account not authenticated. Running gcloud auth login..."
     gcloud auth login $ACCOUNT_EMAIL
@@ -32,21 +40,32 @@ gcloud config set project $PROJECT_ID
 
 # --- Deploy the Function ---
 echo "☁️ Deploying function: $FUNCTION_NAME in region $REGION..."
+echo "📝 Environment variables:"
+echo "   - GCP_PROJECT_ID: $PROJECT_ID"
+echo "   - CLOUD_TASKS_QUEUE: $CLOUD_TASKS_QUEUE"
+echo "   - CLOUD_TASKS_LOCATION: $CLOUD_TASKS_LOCATION"
+echo "   - WORKER_FUNCTION_URL: $WORKER_FUNCTION_URL"
 
 gcloud functions deploy $FUNCTION_NAME \
+  --gen2 \
   --runtime $RUNTIME \
   --region $REGION \
   --entry-point $ENTRY_POINT \
   --source $SOURCE_DIR \
   --trigger-http \
   --allow-unauthenticated \
-  --max-instances 1 \
+  --max-instances 10 \
   --min-instances 0 \
   --memory 256Mi \
-  --timeout 60s
+  --timeout 60s \
+  --set-env-vars GCP_PROJECT_ID=$PROJECT_ID,CLOUD_TASKS_QUEUE=$CLOUD_TASKS_QUEUE,CLOUD_TASKS_LOCATION=$CLOUD_TASKS_LOCATION,WORKER_FUNCTION_URL=$WORKER_FUNCTION_URL
 
 echo "✅ Deployment complete!"
-echo " "
-echo "➡️ To find the public URL and view logs, use the following commands:"
-echo "   gcloud functions describe $FUNCTION_NAME --region $REGION --format='value(serviceConfig.uri)'"
-echo "   gcloud functions logs read $FUNCTION_NAME --region $REGION --limit 50"
+echo ""
+echo "📍 Function URL:"
+gcloud functions describe $FUNCTION_NAME --region $REGION --gen2 --format='value(serviceConfig.uri)'
+echo ""
+echo "📋 To view logs:"
+echo "   gcloud functions logs read $FUNCTION_NAME --region $REGION --gen2 --limit 50"
+echo ""
+echo "⚠️  IMPORTANT: Update WORKER_FUNCTION_URL in this script after Phase 2!"

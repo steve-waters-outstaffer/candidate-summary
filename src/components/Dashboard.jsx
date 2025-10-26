@@ -8,12 +8,16 @@ import {
     Box,
     Container,
     Tabs,
-    Tab
+    Tab,
+    IconButton,
+    Tooltip
 } from '@mui/material';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useAuth } from '../contexts/AuthContext';
 import { logoutUser } from '../services/AuthService.js';
 import CandidateSummaryGenerator from './CandidateSummaryGenerator';
 import BulkGenerator from './BulkGenerator';
+import PromptAdmin from './PromptAdmin';
 import { CustomColors } from '../theme';
 
 const Dashboard = () => {
@@ -24,6 +28,9 @@ const Dashboard = () => {
     // State for the bulk generation job, lifted up from BulkGenerator
     const [bulkJobId, setBulkJobId] = useState(null);
     const [bulkJobStatus, setBulkJobStatus] = useState(null);
+
+    // Admin access control - add your email here
+    const isAdmin = currentUser?.email === 'steve.waters@outstaffer.com';
 
     const handleTabChange = (event, newValue) => {
         setCurrentTab(newValue);
@@ -38,6 +45,10 @@ const Dashboard = () => {
         }
     };
 
+    const handleSettingsClick = () => {
+        setCurrentTab(2); // Switch to Admin tab
+    };
+
     return (
         <Box sx={{ display: 'flex' }}>
             <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1, backgroundColor: CustomColors.MidnightBlue }}>
@@ -48,6 +59,18 @@ const Dashboard = () => {
                     <Typography variant="body2" sx={{ mr: 2 }}>
                         {currentUser?.email}
                     </Typography>
+                    {isAdmin && (
+                        <Tooltip title="Admin Settings">
+                            <IconButton
+                                color="inherit"
+                                onClick={handleSettingsClick}
+                                size="small"
+                                sx={{ mr: 1 }}
+                            >
+                                <SettingsIcon />
+                            </IconButton>
+                        </Tooltip>
+                    )}
                     <Button
                         variant="outlined"
                         color="default"
@@ -69,6 +92,7 @@ const Dashboard = () => {
                     >
                         <Tab label="Single Candidate Summary" />
                         <Tab label="Bulk Job Processor" />
+                        {isAdmin && <Tab label="Admin" />}
                     </Tabs>
                 </Box>
 
@@ -82,6 +106,7 @@ const Dashboard = () => {
                             setJobStatus={setBulkJobStatus}
                         />
                     )}
+                    {currentTab === 2 && isAdmin && <PromptAdmin />}
                 </Box>
             </Container>
         </Box>

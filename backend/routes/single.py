@@ -22,9 +22,14 @@ try:
         fetch_alpharun_interview,
         get_recruitcrm_headers,
         fetch_recruitcrm_candidate_job_specific_fields,
-        fetch_candidate_interview_id
+        fetch_candidate_interview_id,
+        fetch_candidate_notes
     )
     log.info("routes.single: Successfully imported from helpers.recruitcrm_helpers.")
+
+    log.info("routes.single: Importing from helpers.quil_helpers...")
+    from helpers.quil_helpers import get_quil_interview_for_job
+    log.info("routes.single: Successfully imported from helpers.quil_helpers.")
 
     log.info("routes.single: Importing from helpers.fireflies_helpers...")
     from helpers.fireflies_helpers import (
@@ -189,6 +194,65 @@ def test_fireflies():
         })
     return jsonify({'error': 'Failed to fetch transcript data from Fireflies.ai'}), 404
 
+@single_bp.route('/test-quil', methods=['POST'])
+def test_quil():
+    """Tests Quil note detection and matching for a candidate and job."""
+    log.info("single.test_quil.hit")
+    data = request.get_json()
+    
+    candidate_slug = data.get('candidate_slug')
+    job_slug = data.get('job_slug')
+    
+    if not candidate_slug or not job_slug:
+        return jsonify({'error': 'Missing candidate_slug or job_slug'}), 400
+    
+    try:
+        # Fetch candidate notes
+        candidate_notes = fetch_candidate_notes(candidate_slug)
+        
+        if not candidate_notes:
+            return jsonify({'error': 'No notes found for candidate'}), 404
+        
+        # Count Quil notes
+        quil_notes = [n for n in candidate_notes if n.get('description', '').startswith('Quil ')]
+        
+        if not quil_notes:
+            return jsonify({'error': 'No Quil interview notes found for this candidate'}), 404
+        
+        # Fetch job details for matching
+        job_data = fetch_recruitcrm_job(job_slug)
+        if not job_data:
+            return jsonify({'error': 'Failed to fetch job data'}), 404
+        
+        job_details = job_data.get('data', job_data)
+        job_title = job_details.get('name', 'Unknown Job')
+        job_description = job_details.get('description', '')
+        
+        # Get matched Quil note
+        quil_data = get_quil_interview_for_job(
+            candidate_notes,
+            job_slug,
+            job_title,
+            job_description
+        )
+        
+        if quil_data:
+            return jsonify({
+                'success': True,
+                'message': 'Quil interview notes found and matched',
+                'quil_notes_count': len(quil_notes),
+                'matched_date': quil_data.get('date'),
+                'matched_title': quil_data.get('title'),
+                'has_summary': bool(quil_data.get('summary_html')),
+                'has_url': bool(quil_data.get('quil_url'))
+            })
+        else:
+            return jsonify({'error': 'Quil notes found but matching failed'}), 500
+            
+    except Exception as e:
+        log.error("single.test_quil.error", error=str(e))
+        return jsonify({'error': str(e)}), 500
+
 @single_bp.route('/test-resume', methods=['POST'])
 def test_resume():
     """Checks for the presence of a resume in the candidate data."""
@@ -269,6 +333,34 @@ def generate_summary():
             if resume_info:
                 gemini_resume_file = upload_resume_to_gemini(resume_info, client)
 
+        # --- QUIL INTERVIEW LOGIC ---
+        quil_data = None
+        use_quil = data.get('use_quil', False)
+        if use_quil and candidate_slug and job_slug:
+            log.info("single.generate_summary.fetching_quil", 
+                     candidate_slug=candidate_slug, 
+                     job_slug=job_slug)
+            try:
+                candidate_notes = fetch_candidate_notes(candidate_slug)
+                job_title = job_details.get('name', 'Unknown Job')
+                job_description = job_details.get('description', '')
+                
+                quil_data = get_quil_interview_for_job(
+                    candidate_notes,
+                    job_slug,
+                    job_title,
+                    job_description
+                )
+                
+                if quil_data:
+                    log.info("single.generate_summary.quil_found", 
+                             has_summary=bool(quil_data.get('summary_html')))
+                else:
+                    log.warning("single.generate_summary.quil_not_found")
+            except Exception as e:
+                log.error("single.generate_summary.quil_error", error=str(e))
+        # --- END QUIL INTERVIEW LOGIC ---
+
         fireflies_data = None
         if fireflies_url:
             transcript_id = extract_fireflies_transcript_id(fireflies_url)
@@ -277,7 +369,7 @@ def generate_summary():
                 if raw_transcript:
                     fireflies_data = normalise_fireflies_transcript(raw_transcript)
 
-        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, client)
+        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, quil_data, gemini_resume_file, client)
 
         if html_summary:
             return jsonify({'success': True, 'html_summary': html_summary, 'candidate_slug': candidate_slug})

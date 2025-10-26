@@ -135,6 +135,10 @@ try:
     from routes.webhooks import webhooks_bp
     log.info("Successfully imported routes.webhooks.")
 
+    log.info("Importing routes.admin...")
+    from routes.admin import admin_bp
+    log.info("Successfully imported routes.admin.")
+
     log.info("blueprints_imported")
 
     log.info("registering_blueprints")
@@ -142,6 +146,7 @@ try:
     app.register_blueprint(multi_bp, url_prefix='/api')
     app.register_blueprint(bulk_bp, url_prefix='/api')
     app.register_blueprint(webhooks_bp, url_prefix='/api')
+    app.register_blueprint(admin_bp)  # Admin routes already have /api prefix
     log.info("blueprints_registered")
 
 except Exception as e:

@@ -175,7 +175,7 @@ def generate_ai_response(client, prompt_parts):
             log.error("ai.generate_response.response_details", response=str(e.response))
         return None
 
-def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, gemini_resume_file, client):
+def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, quil_data, gemini_resume_file, client):
     """Builds the full prompt and generates an HTML summary using the AI model."""
     full_prompt = build_full_prompt(
         prompt_type,
@@ -184,17 +184,16 @@ def generate_html_summary(candidate_data, job_data, interview_data, additional_c
         job_data=job_data.get('data', job_data),
         interview_data=interview_data.get('data', interview_data) if interview_data else {},
         additional_context=additional_context,
-        fireflies_data=fireflies_data
+        fireflies_data=fireflies_data,
+        quil_data=quil_data
     )
     
-    # With the new google-genai SDK, files and text should be passed as separate items in a list
-    # The SDK will handle the proper formatting internally
-    contents = []
-    contents.append({"role": "user", "parts": [{"text": full_prompt}]})
+    # Build contents list for google-genai SDK
+    contents = [full_prompt]  # Start with just the text prompt
     
     if gemini_resume_file:
-        # Add the file as a part using the file URI
-        contents[0]["parts"].append({"file_data": {"file_uri": gemini_resume_file.uri}})
+        # Add the file reference
+        contents.append(gemini_resume_file)
 
     html_summary = generate_ai_response(client, contents)
     if html_summary:
