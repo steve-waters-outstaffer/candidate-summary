@@ -13,7 +13,7 @@ MEMORY="512MB"
 TIMEOUT="540s"  # 9 minutes (max for Cloud Functions)
 
 # Environment variables
-FLASK_APP_URL="https://candidate-summary-api-us-central1-candidate-summary-ai.run.app"
+FLASK_APP_URL="https://candidate-summary-api-hdg54dp7ga-uc.a.run.app"
 
 echo "🚀 Deploying Summary Worker Cloud Function..."
 echo "📍 Region: $REGION"

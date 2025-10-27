@@ -67,5 +67,4 @@ gcloud functions describe $FUNCTION_NAME --region $REGION --gen2 --format='value
 echo ""
 echo "📋 To view logs:"
 echo "   gcloud functions logs read $FUNCTION_NAME --region $REGION --gen2 --limit 50"
-echo ""
-echo "⚠️  IMPORTANT: Update WORKER_FUNCTION_URL in this script after Phase 2!"
+
