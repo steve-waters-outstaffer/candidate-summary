@@ -168,7 +168,13 @@ def fetch_candidate_notes(candidate_slug):
         response = requests.get(url, headers=get_recruitcrm_headers(), params=params)
         response.raise_for_status()
         data = response.json()
-        notes = data.get('data', [])
+        
+        # RecruitCRM sometimes returns list directly, sometimes {'data': [...]}
+        if isinstance(data, list):
+            notes = data
+        else:
+            notes = data.get('data', [])
+            
         log.info("recruitcrm.fetch_candidate_notes.success", 
                  candidate_slug=candidate_slug, 
                  note_count=len(notes))

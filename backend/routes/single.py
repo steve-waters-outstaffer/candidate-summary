@@ -209,12 +209,18 @@ def test_quil():
     try:
         # Fetch candidate notes
         candidate_notes = fetch_candidate_notes(candidate_slug)
+        log.info("single.test_quil.fetched_notes", 
+                 note_count=len(candidate_notes) if candidate_notes else 0,
+                 notes_type=type(candidate_notes).__name__)
         
         if not candidate_notes:
             return jsonify({'error': 'No notes found for candidate'}), 404
         
         # Count Quil notes
         quil_notes = [n for n in candidate_notes if n.get('description', '').startswith('Quil ')]
+        log.info("single.test_quil.filtered_quil_notes",
+                 quil_count=len(quil_notes),
+                 quil_type=type(quil_notes).__name__)
         
         if not quil_notes:
             return jsonify({'error': 'No Quil interview notes found for this candidate'}), 404
@@ -229,12 +235,17 @@ def test_quil():
         job_description = job_details.get('description', '')
         
         # Get matched Quil note
+        log.info("single.test_quil.calling_get_quil_interview",
+                 candidate_notes_type=type(candidate_notes).__name__,
+                 job_slug=job_slug)
         quil_data = get_quil_interview_for_job(
             candidate_notes,
             job_slug,
             job_title,
             job_description
         )
+        log.info("single.test_quil.got_quil_data",
+                 quil_data_type=type(quil_data).__name__ if quil_data else "None")
         
         if quil_data:
             return jsonify({
@@ -250,8 +261,9 @@ def test_quil():
             return jsonify({'error': 'Quil notes found but matching failed'}), 500
             
     except Exception as e:
-        log.error("single.test_quil.error", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("single.test_quil.error", error=str(e), exc_info=True)
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @single_bp.route('/test-resume', methods=['POST'])
 def test_resume():

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     AppBar,
@@ -10,15 +10,18 @@ import {
     Tabs,
     Tab,
     IconButton,
-    Tooltip
+    Tooltip,
+    CircularProgress
 } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useAuth } from '../contexts/AuthContext';
 import { logoutUser } from '../services/AuthService.js';
 import CandidateSummaryGenerator from './CandidateSummaryGenerator';
 import BulkGenerator from './BulkGenerator';
-import PromptAdmin from './PromptAdmin';
 import { CustomColors } from '../theme';
+
+// Lazy load PromptAdmin since it's heavy
+const PromptAdmin = lazy(() => import('./PromptAdmin'));
 
 const Dashboard = () => {
     const { currentUser } = useAuth();
@@ -106,7 +109,11 @@ const Dashboard = () => {
                             setJobStatus={setBulkJobStatus}
                         />
                     )}
-                    {currentTab === 2 && isAdmin && <PromptAdmin />}
+                    {currentTab === 2 && isAdmin && (
+                        <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}>
+                            <PromptAdmin />
+                        </Suspense>
+                    )}
                 </Box>
             </Container>
         </Box>

@@ -17,8 +17,8 @@ CLOUD_TASKS_QUEUE="candidate-summary-queue"
 CLOUD_TASKS_LOCATION="us-central1"
 
 # IMPORTANT: Set this to your worker function URL after creating it in Phase 2
-# For now, use a placeholder - update after Phase 2
-WORKER_FUNCTION_URL="https://REPLACE-WITH-WORKER-URL-AFTER-PHASE-2"
+# Updated: 2024-10-27
+WORKER_FUNCTION_URL="https://us-central1-candidate-summary-ai.cloudfunctions.net/summary-worker"
 
 # ---------------------
 

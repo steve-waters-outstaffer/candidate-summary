@@ -115,13 +115,17 @@ def select_best_quil_note_with_gemini(
         # Fallback: return first note with job association, or just first note
         for note in quil_notes:
             if job_slug in note.get('associated_jobs', []):
+                log.info("quil.select_best_note.fallback_found_associated")
                 return note
+        log.info("quil.select_best_note.fallback_returning_first")
         return quil_notes[0] if quil_notes else None
     
     if not quil_notes:
         return None
     
     try:
+        log.info("quil.select_best_note.preparing_gemini_request", note_count=len(quil_notes))
+        
         # Prepare note summaries for Gemini
         notes_data = []
         for note in quil_notes:
@@ -140,6 +144,8 @@ def select_best_quil_note_with_gemini(
                     note_info['title'] = title_match.group(1)
             
             notes_data.append(note_info)
+        
+        log.info("quil.select_best_note.calling_gemini", notes_prepared=len(notes_data))
         
         prompt = f"""
 You are analyzing Quil meeting notes to find the best interview note for a specific job.
@@ -170,14 +176,26 @@ Description: {job_description[:1000]}
 If no notes contain actual interview content, return has_valid_interview=false and selected_note_id=null.
 """
         
-        response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
-            contents=prompt,
-            config=genai.types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=QuilNoteSelection
+        log.info("quil.select_best_note.sending_to_gemini")
+        
+        # Add timeout to prevent hanging
+        import socket
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(30)  # 30 second timeout
+        
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.0-flash-exp',
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=QuilNoteSelection
+                )
             )
-        )
+        finally:
+            socket.setdefaulttimeout(old_timeout)
+        
+        log.info("quil.select_best_note.gemini_responded")
         
         result = QuilNoteSelection.model_validate_json(response.text)
         
@@ -232,13 +250,18 @@ def get_quil_interview_for_job(
     """
     log.info("quil.get_quil_interview_for_job.called", 
              job_slug=job_slug,
-             total_notes=len(candidate_notes))
+             total_notes=len(candidate_notes),
+             candidate_notes_type=type(candidate_notes).__name__)
     
     # Filter for Quil notes only
     quil_notes = [
         note for note in candidate_notes 
         if note.get('description', '').startswith('Quil ')
     ]
+    
+    log.info("quil.get_quil_interview_for_job.filtered",
+             quil_notes_count=len(quil_notes),
+             quil_notes_type=type(quil_notes).__name__)
     
     if not quil_notes:
         log.info("quil.get_quil_interview_for_job.no_quil_notes")
@@ -248,6 +271,7 @@ def get_quil_interview_for_job(
              count=len(quil_notes))
     
     # Use ONE Gemini call to validate and select best note
+    log.info("quil.get_quil_interview_for_job.calling_gemini")
     best_note = select_best_quil_note_with_gemini(
         quil_notes, 
         job_slug, 
@@ -255,9 +279,14 @@ def get_quil_interview_for_job(
         job_description
     )
     
+    log.info("quil.get_quil_interview_for_job.gemini_returned",
+             best_note_type=type(best_note).__name__ if best_note else "None")
+    
     if not best_note:
         log.warning("quil.get_quil_interview_for_job.no_match_found")
         return None
     
     # Extract and return the data
+    log.info("quil.get_quil_interview_for_job.extracting_data",
+             best_note_has_description=('description' in best_note) if isinstance(best_note, dict) else False)
     return extract_quil_data(best_note['description'])
