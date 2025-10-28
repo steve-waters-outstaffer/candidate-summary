@@ -20,8 +20,10 @@ import CandidateSummaryGenerator from './CandidateSummaryGenerator';
 import BulkGenerator from './BulkGenerator';
 import { CustomColors } from '../theme';
 
-// Lazy load PromptAdmin since it's heavy
+// Lazy load admin components since they're heavy
 const PromptAdmin = lazy(() => import('./PromptAdmin'));
+const SummaryRunsViewer = lazy(() => import('./SummaryRunsViewer'));
+const WebhookConfig = lazy(() => import('./WebhookConfig'));
 
 const Dashboard = () => {
     const { currentUser } = useAuth();
@@ -95,7 +97,9 @@ const Dashboard = () => {
                     >
                         <Tab label="Single Candidate Summary" />
                         <Tab label="Bulk Job Processor" />
-                        {isAdmin && <Tab label="Admin" />}
+                        {isAdmin && <Tab label="Prompt Admin" />}
+                        {isAdmin && <Tab label="Summary Runs" />}
+                        {isAdmin && <Tab label="Webhook Config" />}
                     </Tabs>
                 </Box>
 
@@ -112,6 +116,16 @@ const Dashboard = () => {
                     {currentTab === 2 && isAdmin && (
                         <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}>
                             <PromptAdmin />
+                        </Suspense>
+                    )}
+                    {currentTab === 3 && isAdmin && (
+                        <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}>
+                            <SummaryRunsViewer />
+                        </Suspense>
+                    )}
+                    {currentTab === 4 && isAdmin && (
+                        <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}>
+                            <WebhookConfig />
                         </Suspense>
                     )}
                 </Box>

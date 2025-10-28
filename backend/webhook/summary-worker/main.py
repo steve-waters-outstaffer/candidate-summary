@@ -26,19 +26,61 @@ db = firestore.Client()
 
 # Configuration
 REQUEST_TIMEOUT = 60  # seconds
-DEFAULT_CONFIG = {
-    'use_quil': True,  # Fixed: snake_case to match API expectations
+
+# --- NEW: Fallback config if Firestore read fails ---
+# Based on your webhook_config JSON
+FALLBACK_CONFIG = {
+    'use_quil': True,
     'include_fireflies': False,
     'proceed_without_interview': False,
     'additional_context': '',
-    'prompt_id': 'recruitment.detailed-v2'  # Default prompt matching UI
+    'prompt_type': 'summary-for-platform-v2',  # Fallback prompt,  # Fallback prompt
+    # --- ADDED new config keys ---
+    'auto_push': False,
+    'create_tracking_note': False,
+    'auto_push_delay_seconds': 0
 }
+
+
+# --- NEW: Function to fetch dynamic config from Firestore ---
+def get_dynamic_config():
+    """Fetch dynamic configuration from Firestore."""
+    try:
+        doc_ref = db.collection('webhook_config').document('default')
+        doc = doc_ref.get()
+        if doc.exists:
+            config_data = doc.to_dict()
+            logger.info("✅ Fetched dynamic config from Firestore.")
+            # Map Firestore fields to the format generate_summary expects
+            # This provides a safe mapping layer.
+            return {
+                'use_quil': config_data.get('use_quil', FALLBACK_CONFIG['use_quil']),
+                'include_fireflies': config_data.get('use_fireflies', FALLBACK_CONFIG['include_fireflies']),
+                'proceed_without_interview': config_data.get('proceed_without_interview', FALLBACK_CONFIG['proceed_without_interview']),
+                'additional_context': config_data.get('additional_context', FALLBACK_CONFIG['additional_context']),
+                'prompt_type': config_data.get('default_prompt_id', FALLBACK_CONFIG['prompt_type']),
+                # --- ADDED mapping for new keys ---
+                'auto_push': config_data.get('auto_push', FALLBACK_CONFIG['auto_push']),
+                'create_tracking_note': config_data.get('create_tracking_note', FALLBACK_CONFIG['create_tracking_note']),
+                'auto_push_delay_seconds': config_data.get('auto_push_delay_seconds', FALLBACK_CONFIG['auto_push_delay_seconds'])
+            }
+        else:
+            logger.warning("⚠️ Firestore config doc 'webhook_config/default' not found. Using fallback.")
+            return FALLBACK_CONFIG
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch Firestore config: {e}. Using fallback.")
+        return FALLBACK_CONFIG
 
 
 def log_to_firestore(run_data):
     """Log the summary generation run to Firestore."""
     try:
-        doc_ref = db.collection('candidate_summary_runs').document()
+        # Use a structured ID for easier querying
+        # Format: YYYYMMDD_HHMMSS_CandidateSlug_JobSlug
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        doc_id = f"{timestamp_str}_{run_data['candidate_slug']}_{run_data['job_slug']}"
+
+        doc_ref = db.collection('candidate_summary_runs').document(doc_id)
         run_data['timestamp'] = firestore.SERVER_TIMESTAMP
         doc_ref.set(run_data)
         logger.info(f"✅ Logged run to Firestore: {doc_ref.id}")
@@ -123,6 +165,8 @@ def generate_summary(candidate_slug, job_slug, config):
         response.raise_for_status()
 
         duration = time.time() - start_time
+
+        # --- FIX: Restored the missing code block below ---
         data = response.json()
 
         success = data.get('success', False)
@@ -165,6 +209,59 @@ def generate_summary(candidate_slug, job_slug, config):
             'error': str(e),
             'data': None
         }
+    # --- End of restored code block ---
+
+# --- ADDED: Stub function for creating a note ---
+def handle_note_creation(candidate_slug, job_slug, summary_html, triggered_by):
+    """(Stub) Creates a tracking note in RecruitCRM."""
+    try:
+        logger.info(f"ACTION: Creating tracking note for {candidate_slug}...")
+        # TODO: Implement API call to RecruitCRM to create a note
+        # Example:
+        # note_payload = {
+        #     'candidate_slug': candidate_slug,
+        #     'job_slug': job_slug,
+        #     'note_html': summary_html,
+        #     'triggered_by_email': triggered_by.get('email') if triggered_by else None
+        # }
+        # response = requests.post(f"{FLASK_APP_URL}/api/create-note", json=note_payload, timeout=REQUEST_TIMEOUT)
+        # response.raise_for_status()
+        # logger.info("✅ Tracking note created successfully.")
+
+        # Simulating success for now
+        time.sleep(0.1) # Simulate network delay
+        logger.info("✅ (Stub) Tracking note created.")
+        return {'success': True, 'error': None, 'message': 'Note created (stub)'}
+
+    except Exception as e:
+        logger.error(f"❌ Failed to create tracking note: {e}")
+        return {'success': False, 'error': str(e), 'message': 'Failed to create note'}
+
+# --- ADDED: Stub function for auto-pushing candidate ---
+def handle_auto_push(candidate_slug, job_slug, delay_seconds, triggered_by):
+    """(Stub) Pushes candidate to the next stage."""
+    try:
+        logger.info(f"ACTION: Auto-pushing candidate {candidate_slug} with {delay_seconds}s delay...")
+        # TODO: Implement API call to RecruitCRM to push stage
+        # Example:
+        # push_payload = {
+        #     'candidate_slug': candidate_slug,
+        #     'job_slug': job_slug,
+        #     'delay_seconds': delay_seconds,
+        #     'triggered_by_email': triggered_by.get('email') if triggered_by else None
+        # }
+        # response = requests.post(f"{FLASK_APP_URL}/api/push-stage", json=push_payload, timeout=REQUEST_TIMEOUT)
+        # response.raise_for_status()
+        # logger.info("✅ Candidate auto-push queued successfully.")
+
+        # Simulating success for now
+        time.sleep(0.1) # Simulate network delay
+        logger.info("✅ (Stub) Candidate auto-push triggered.")
+        return {'success': True, 'error': None, 'message': 'Auto-push triggered (stub)'}
+
+    except Exception as e:
+        logger.error(f"❌ Failed to trigger auto-push: {e}")
+        return {'success': False, 'error': str(e), 'message': 'Failed to trigger auto-push'}
 
 
 def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=None):
@@ -173,7 +270,11 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
     Mirrors the UI flow from CandidateSummaryGenerator.jsx
     """
 
+    # --- NEW: Fetch dynamic config at the start of the process ---
+    dynamic_config = get_dynamic_config()
+
     logger.info(f"🚀 Starting summary generation for {candidate_slug} / {job_slug}")
+    logger.info(f"⚙️ Using config (Prompt: {dynamic_config.get('prompt_id')})")
     if updated_by:
         logger.info(f"👤 Triggered by: {updated_by.get('first_name')} {updated_by.get('last_name')} ({updated_by.get('email')})")
 
@@ -193,8 +294,23 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
             'worker_version': WORKER_VERSION,
             'triggered_by': updated_by,  # Track who triggered this in RecruitCRM
             **task_metadata
+        },
+        'config_used': dynamic_config, # Log the config that was used for this run
+        # --- ADDED: Placeholders for post-generation actions ---
+        'post_actions': {
+            'note_creation': None,
+            'auto_push': None
         }
     }
+
+    # --- Add top-level fields for easier querying in Firestore ---
+    # These are duplicated but make filtering in Firestore much easier
+    if updated_by:
+        run_data['triggered_by_email'] = updated_by.get('email')
+
+    run_data['success'] = False # Default to false, set to true on success
+    # --- NEW: Add prompt_id as a top-level field for UI filtering ---
+    run_data['prompt_id'] = dynamic_config.get('prompt_type')
 
     # --- FIX 2: Added method='POST' to all test_endpoint calls ---
 
@@ -204,6 +320,11 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
         'success': candidate_test['success'],
         'error': candidate_test['error']
     }
+
+    # --- Add candidate/job names to top-level for Firestore ---
+    if candidate_test['success'] and candidate_test['data']:
+        # Frontend expects: apiStatus.candidate.data.candidate_name
+        run_data['candidate_name'] = candidate_test['data'].get('candidate_name', 'N/A')
 
     if not candidate_test['success']:
         logger.error("❌ BLOCKING: Candidate data not found. Stopping.")
@@ -222,6 +343,11 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
         'success': job_test['success'],
         'error': job_test['error']
     }
+
+    # --- Add job name to top-level for Firestore ---
+    if job_test['success'] and job_test['data']:
+        # Frontend expects: apiStatus.job.data.job_name
+        run_data['job_name'] = job_test['data'].get('job_name', 'N/A')
 
     if not job_test['success']:
         logger.error("❌ BLOCKING: Job data not found. Stopping.")
@@ -270,33 +396,76 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
     sources = [k for k, v in run_data['sources_used'].items() if v]
     logger.info(f"📦 Available sources: {', '.join(sources) if sources else 'None'}")
 
+    # --- ADDED: Logic to check if we should proceed without interviews ---
+    has_interview = run_data['sources_used']['anna_ai'] or run_data['sources_used']['quil']
+    proceed_without_interview = dynamic_config.get('proceed_without_interview', False)
+
+    if not has_interview and not proceed_without_interview:
+        logger.error("❌ BLOCKING: No interview data (Anna/Quil) found and 'proceed_without_interview' is false. Stopping.")
+        run_data['generation'] = {
+            'success': False,
+            'summary_length': 0,
+            'duration_seconds': 0,
+            'error': 'No interview data found and proceeding without it is disabled'
+        }
+        log_to_firestore(run_data)
+        return False, "No interview data found", run_data
+    elif not has_interview:
+        logger.warning("⚠️ No interview data (Anna/Quil) found, but proceeding as 'proceed_without_interview' is true.")
+    # --- End of new logic ---
+
+
     # Step 6: Generate Summary
-    generation_result = generate_summary(candidate_slug, job_slug, DEFAULT_CONFIG)
+    # --- UPDATED: Pass the dynamic_config to the generation function ---
+    generation_result = generate_summary(candidate_slug, job_slug, dynamic_config)
     run_data['generation'] = generation_result
+    run_data['success'] = generation_result['success'] # Update top-level success
 
-    # Log to Firestore
-    firestore_id = log_to_firestore(run_data)
+    # --- Add summary html to top level for display in Firestore ---
+    # --- FIX: Changed 'generation_config' to 'generation_result' ---
+    if generation_result['success'] and generation_result['data']:
+        run_data['summary_html'] = generation_result['data'].get('summary', '')
 
-    # TODO: Send notification when complete
-    # Options:
-    # 1. Slack notification to #recruitment channel
-    # 2. Email to updated_by user
-    # 3. Webhook back to RecruitCRM (activity feed)
-    #
-    # Implementation ideas:
-    # - Success: "✅ Summary generated for {candidate_name} / {job_title}"
-    # - Failure: "❌ Summary failed for {candidate_slug} - {error}"
-    # - Include link to candidate in RecruitCRM
-    # - Show sources used (Resume, Anna AI, Quil)
-    # - Show generation time
-
+    # --- UPDATED: This section now runs AFTER generation but BEFORE logging ---
     if generation_result['success']:
-        logger.info(f"✅ Summary generation complete. Firestore ID: {firestore_id}")
-        # TODO: send_slack_notification(updated_by, candidate_slug, job_slug, run_data)
-        return True, "Summary generated successfully", run_data
+        logger.info(f"✅ Summary generation complete. Checking post-actions...")
+
+        # Check if note creation is enabled
+        if dynamic_config.get('create_tracking_note'):
+            note_result = handle_note_creation(
+                candidate_slug,
+                job_slug,
+                run_data.get('summary_html', ''),
+                updated_by
+            )
+            run_data['post_actions']['note_creation'] = note_result
+        else:
+            logger.info("⏭️ Skipping note creation (disabled in config).")
+
+        # Check if auto-push is enabled
+        if dynamic_config.get('auto_push'):
+            push_result = handle_auto_push(
+                candidate_slug,
+                job_slug,
+                dynamic_config.get('auto_push_delay_seconds', 0),
+                updated_by
+            )
+            run_data['post_actions']['auto_push'] = push_result
+        else:
+            logger.info("⏭️ Skipping auto-push (disabled in config).")
+
     else:
         logger.error(f"❌ Summary generation failed: {generation_result['error']}")
-        # TODO: send_slack_notification(updated_by, candidate_slug, job_slug, run_data, failed=True)
+
+    # Log to Firestore (now includes post_action results)
+    firestore_id = log_to_firestore(run_data)
+    run_data['firestore_id'] = firestore_id # Add ID to return data
+
+    if generation_result['success']:
+        logger.info(f"✅ Process complete. Firestore ID: {firestore_id}")
+        return True, "Summary generated successfully", run_data
+    else:
+        logger.error(f"❌ Process failed. Firestore ID: {firestore_id}")
         return False, generation_result['error'], run_data
 
 
@@ -380,4 +549,6 @@ def summary_worker(request):
             "message": "Internal server error",
             "error": str(e)
         }), 500
+
+# --- FIX: Removed the extra '}' that was causing a SyntaxError ---
 
