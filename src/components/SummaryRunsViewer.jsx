@@ -28,6 +28,29 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DescriptionIcon from '@mui/icons-material/Description';
 
+const SOURCE_ORDER = ['resume', 'anna_ai', 'quil', 'fireflies', 'additional_context'];
+const SOURCE_LABELS = {
+    resume: 'CV',
+    anna_ai: 'Anna',
+    quil: 'Quil',
+    fireflies: 'Fireflies',
+    additional_context: 'Context'
+};
+
+const getResolvedSources = (run) => {
+    const promptSources = run?.prompt_sources || {};
+    const testSources = run?.sources_used || {};
+    const merged = { ...testSources, ...promptSources };
+    return {
+        merged,
+        promptSources,
+        availableKeys: SOURCE_ORDER.filter((key) =>
+            Object.prototype.hasOwnProperty.call(promptSources, key) ||
+            Object.prototype.hasOwnProperty.call(testSources, key)
+        )
+    };
+};
+
 const SummaryRunsViewer = () => {
     const [runs, setRuns] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -177,18 +200,26 @@ const SummaryRunsViewer = () => {
                                     </TableCell>
                                     <TableCell>
                                         <Box sx={{ display: 'flex', gap: 0.5 }}>
-                                            {run.sources_used?.resume && (
-                                                <Chip icon={<DescriptionIcon />} label="CV" size="small" />
-                                            )}
-                                            {run.sources_used?.anna_ai && (
-                                                <Chip label="Anna" size="small" />
-                                            )}
-                                            {run.sources_used?.quil && (
-                                                <Chip label="Quil" size="small" />
-                                            )}
-                                            {run.sources_used?.fireflies && (
-                                                <Chip label="Fireflies" size="small" />
-                                            )}
+                                            {(() => {
+                                                const { merged } = getResolvedSources(run);
+                                                const usedKeys = SOURCE_ORDER.filter((key) => merged[key]);
+
+                                                if (usedKeys.length === 0) {
+                                                    return (
+                                                        <Chip label="No sources" size="small" variant="outlined" />
+                                                    );
+                                                }
+
+                                                return usedKeys.map((key) => (
+                                                    <Chip
+                                                        key={key}
+                                                        icon={key === 'resume' ? <DescriptionIcon /> : undefined}
+                                                        label={SOURCE_LABELS[key] || key}
+                                                        size="small"
+                                                        color="success"
+                                                    />
+                                                ));
+                                            })()}
                                         </Box>
                                     </TableCell>
                                     <TableCell>
@@ -218,7 +249,7 @@ const SummaryRunsViewer = () => {
                                                 </Typography>
                                                 {run.tests && Object.entries(run.tests).map(([key, test]) => (
                                                     <Box key={key} sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                                                        {test.success ? 
+                                                        {test.success ?
                                                             <CheckCircleIcon fontSize="small" color="success" /> : 
                                                             <CancelIcon fontSize="small" color="error" />
                                                         }
@@ -227,7 +258,50 @@ const SummaryRunsViewer = () => {
                                                         </Typography>
                                                     </Box>
                                                 ))}
-                                                
+
+                                                {(() => {
+                                                    const { merged, promptSources, availableKeys } = getResolvedSources(run);
+                                                    if (availableKeys.length === 0 && Object.keys(promptSources).length === 0) {
+                                                        return null;
+                                                    }
+
+                                                    const keysToShow = availableKeys.length > 0 ? availableKeys : SOURCE_ORDER.filter((key) => merged[key]);
+
+                                                    if (keysToShow.length === 0) {
+                                                        return null;
+                                                    }
+
+                                                    return (
+                                                        <Box sx={{ mt: 2 }}>
+                                                            <Typography variant="subtitle2" gutterBottom>
+                                                                Sources Used in Prompt
+                                                            </Typography>
+                                                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                                                                {keysToShow.map((key) => {
+                                                                    const wasUsed = !!merged[key];
+                                                                    const label = SOURCE_LABELS[key] || key;
+
+                                                                    return (
+                                                                        <Chip
+                                                                            key={key}
+                                                                            label={label}
+                                                                            size="small"
+                                                                            color={wasUsed ? 'success' : 'default'}
+                                                                            variant={wasUsed ? 'filled' : 'outlined'}
+                                                                            icon={wasUsed ? <CheckCircleIcon fontSize="small" /> : undefined}
+                                                                        />
+                                                                    );
+                                                                })}
+                                                            </Box>
+                                                            {Object.keys(promptSources).length > 0 && (
+                                                                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                                                                    Logged from summary generation response to confirm prompt inputs.
+                                                                </Typography>
+                                                            )}
+                                                        </Box>
+                                                    );
+                                                })()}
+
                                                 {run.generation?.error && (
                                                     <Box sx={{ mt: 2 }}>
                                                         <Typography variant="subtitle2" color="error" gutterBottom>
