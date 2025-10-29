@@ -170,19 +170,25 @@ const WebhookConfig = () => {
 
                     {/* Summary Generation Settings */}
                     <Typography variant="h6" gutterBottom>Summary Generation</Typography>
-                    
+
                     <FormControl fullWidth sx={{ mb: 3 }}>
                         <InputLabel>Default Summary Prompt</InputLabel>
                         <Select
-                            value={config.default_prompt_id}
+                            value={prompts.some(p => p.id === config.default_prompt_id) ? config.default_prompt_id : ''}
                             onChange={(e) => handleChange('default_prompt_id', e.target.value)}
                             label="Default Summary Prompt"
                         >
-                            {prompts.map((prompt) => (
-                                <MenuItem key={prompt.id} value={prompt.id}>
-                                    {prompt.name}
+                            {prompts.length === 0 ? (
+                                <MenuItem value="" disabled>
+                                    <em>Loading prompts...</em>
                                 </MenuItem>
-                            ))}
+                            ) : (
+                                prompts.map((prompt) => (
+                                    <MenuItem key={prompt.id} value={prompt.id}>
+                                        {prompt.name}
+                                    </MenuItem>
+                                ))
+                            )}
                         </Select>
                         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, ml: 2 }}>
                             Which prompt template to use when generating candidate summaries automatically

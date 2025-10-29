@@ -8,10 +8,35 @@ from google.cloud import tasks_v2
 from google.protobuf import timestamp_pb2
 import datetime
 
-# Configure logging
-logging.basicConfig(stream=sys.stdout, level=logging.INFO,
-                    format='%(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
+# --- NEW: Import the Google Cloud Logging library ---
+try:
+    import google.cloud.logging
+except ImportError:
+    google = None
+    logging.warning("google.cloud.logging not found. Please add 'google-cloud-logging' to requirements.txt")
+
+
+# --- GCP Compliant Structured Logging Setup ---
+try:
+    # Check if the import was successful
+    if 'google.cloud' in sys.modules and hasattr(google, 'cloud') and hasattr(google.cloud, 'logging'):
+        client = google.cloud.logging.Client()
+        handler = client.get_default_handler()
+        root_logger = logging.getLogger()
+        root_logger.handlers.clear()  # Remove existing handlers
+        root_logger.addHandler(handler)
+        root_logger.setLevel(logging.INFO)
+        logger = logging.getLogger(__name__)
+        logger.info("Structured logging initialized successfully for Webhook Listener.")
+    else:
+        raise Exception("google.cloud.logging module not available.")
+except Exception as e:
+    # Fallback to basic logging if GCP logging fails
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                        format='%(levelname)s: %(message)s')
+    logger = logging.getLogger(__name__)
+    logger.error(f"Failed to initialize GCP structured logging: {e}. Falling back to basicConfig.")
+# --- End of Logging Setup ---
 
 # Environment variables
 GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
@@ -61,34 +86,55 @@ def create_summary_task(candidate_slug, job_slug, payload):
         # Create the task
         response = tasks_client.create_task(request={'parent': parent, 'task': task})
 
-        logger.info(f"✅ Cloud Task created: {response.name}")
+        # --- CONVERTED TO STRUCTURED LOGGING ---
+        logger.info("Cloud task created", extra={
+            "json_fields": {
+                "event": "cloud_task_created",
+                "task_name": response.name,
+                "candidate_slug": candidate_slug,
+                "job_slug": job_slug
+            }
+        })
         return True, response.name
 
     except Exception as e:
-        logger.error(f"❌ Failed to create Cloud Task: {e}")
+        # --- CONVERTED TO STRUCTURED LOGGING ---
+        logger.error("Cloud task creation failed", extra={
+            "json_fields": {
+                "event": "cloud_task_creation_failed",
+                "error": str(e),
+                "candidate_slug": candidate_slug,
+                "job_slug": job_slug
+            }
+        })
         return False, str(e)
 
 
 def webhook_listener(request):
     """Receives webhook payload, filters by status, and creates Cloud Task."""
 
-    logger.info("--- Incoming Webhook Request ---")
+    logger.info("Incoming Webhook Request")
 
     # 1. Check for correct method
     if request.method != 'POST':
+        logger.warning("Method Not Allowed", extra={"json_fields": {"method": request.method}})
         return jsonify({"error": "Method Not Allowed"}), 405
 
     # 2. Validate environment variables
-    if not all([GCP_PROJECT_ID, WORKER_FUNCTION_URL]):
-        logger.error("❌ Missing required environment variables")
+    missing_vars = [
+        k for k, v in {
+            'GCP_PROJECT_ID': GCP_PROJECT_ID,
+            'WORKER_FUNCTION_URL': WORKER_FUNCTION_URL
+        }.items() if not v
+    ]
+    if missing_vars:
+        # --- ENRICHED LOGGING ---
+        logger.error("Missing required environment variables", extra={
+            "json_fields": {"missing": missing_vars}
+        })
         return jsonify({
             "error": "Server configuration error",
-            "missing": [
-                k for k, v in {
-                    'GCP_PROJECT_ID': GCP_PROJECT_ID,
-                    'WORKER_FUNCTION_URL': WORKER_FUNCTION_URL
-                }.items() if not v
-            ]
+            "missing": missing_vars
         }), 500
 
     # 3. Parse and validate payload
@@ -96,25 +142,41 @@ def webhook_listener(request):
         payload = request.get_json(silent=True)
 
         if not payload:
-            logger.warning("⚠️ No JSON payload found")
+            logger.warning("No JSON payload found")
             return jsonify({"error": "Invalid payload"}), 400
 
         # Log the full payload for debugging
-        logger.info("Payload received:")
-        # Use a compact print for logs, but could be indent=2
-        print(json.dumps({"webhook_payload": payload}))
+        # --- CONVERTED TO STRUCTURED LOGGING ---
+        logger.info("Webhook payload received", extra={"json_fields": {"webhook_payload": payload}})
 
-
-        # --- NEW FILTER LOGIC (APPLIED TO ROOT PAYLOAD) ---
+        # --- FILTER LOGIC (APPLIED TO ROOT PAYLOAD) ---
         current_status = payload.get('status', {})
         current_status_id = current_status.get('status_id')
         current_status_label = current_status.get('label', 'N/A')
 
-        logger.info(f"ℹ️ Received webhook for candidate stage: {current_status_id} ({current_status_label})")
+        # Log stage check with structured JSON
+        # --- CONVERTED TO STRUCTURED LOGGING ---
+        logger.info("Stage filter check", extra={
+            "json_fields": {
+                "event": "stage_filter_check",
+                "current_stage_id": current_status_id,
+                "current_stage_label": current_status_label,
+                "target_stage_id": TARGET_STATUS_ID
+            }
+        })
 
         # Check if the status ID matches your target
         if current_status_id != TARGET_STATUS_ID:
-            logger.info(f"⏭️ SKIPPING task: Stage ID {current_status_id} does not match target {TARGET_STATUS_ID}.")
+            # --- CONVERTED TO STRUCTURED LOGGING ---
+            logger.info("Stage filter result: skipped", extra={
+                "json_fields": {
+                    "event": "stage_filter_result",
+                    "filter_matched": False,
+                    "current_stage_id": current_status_id,
+                    "target_stage_id": TARGET_STATUS_ID,
+                    "action": "skipped"
+                }
+            })
             # Return 200 OK so RecruitCRM knows the webhook was
             # received successfully and doesn't try to send it again.
             return jsonify({
@@ -122,9 +184,17 @@ def webhook_listener(request):
                 "message": f"Candidate stage '{current_status_label}' is not the target stage."
             }), 200
 
-        logger.info(f"✅ STAGE MATCH: Proceeding to queue task for candidate.")
-        # --- NEW FILTER LOGIC ENDS ---
-
+        # --- CONVERTED TO STRUCTURED LOGGING ---
+        logger.info("Stage filter result: proceeding", extra={
+            "json_fields": {
+                "event": "stage_filter_result",
+                "filter_matched": True,
+                "current_stage_id": current_status_id,
+                "target_stage_id": TARGET_STATUS_ID,
+                "action": "proceeding_to_queue"
+            }
+        })
+        # --- FILTER LOGIC ENDS ---
 
         # Extract slugs now that filter has passed
         candidate_slug = payload.get('candidate_slug')
@@ -132,8 +202,16 @@ def webhook_listener(request):
 
         # Validate required fields
         if not candidate_slug or not job_slug:
-            logger.error("❌ Missing required fields: candidate_slug or job_slug")
-            logger.error(f"Payload structure: {list(payload.keys())}")
+            # --- CONVERTED TO STRUCTURED LOGGING ---
+            logger.error("Webhook validation error: missing required fields", extra={
+                "json_fields": {
+                    "event": "validation_error",
+                    "error": "missing_required_fields",
+                    "candidate_slug_present": bool(candidate_slug),
+                    "job_slug_present": bool(job_slug),
+                    "payload_keys": list(payload.keys())
+                }
+            })
             return jsonify({
                 "error": "Missing required fields after filter",
                 "required": ["candidate_slug", "job_slug"],
@@ -144,14 +222,29 @@ def webhook_listener(request):
                 "payload_keys": list(payload.keys())
             }), 400
 
-        logger.info(f"📋 Processing: Candidate={candidate_slug}, Job={job_slug}")
+        # Log task queue attempt
+        # --- CONVERTED TO STRUCTURED LOGGING ---
+        logger.info("Task queue attempt", extra={
+            "json_fields": {
+                "event": "task_queue_attempt",
+                "candidate_slug": candidate_slug,
+                "job_slug": job_slug
+            }
+        })
 
         # 4. Create Cloud Task (Pass the original full payload)
-        # --- ADDED LOGGING LINE ---
-        logger.info(f"⏳ Attempting to enqueue task for candidate {candidate_slug}...")
         success, result = create_summary_task(candidate_slug, job_slug, payload)
 
         if success:
+            # --- CONVERTED TO STRUCTURED LOGGING ---
+            logger.info("Task queue success", extra={
+                "json_fields": {
+                    "event": "task_queue_success",
+                    "candidate_slug": candidate_slug,
+                    "job_slug": job_slug,
+                    "task_name": result
+                }
+            })
             return jsonify({
                 "status": "queued",
                 "message": "Summary generation task queued successfully",
@@ -160,6 +253,15 @@ def webhook_listener(request):
                 "job_slug": job_slug
             }), 200
         else:
+            # --- CONVERTED TO STRUCTURED LOGGING ---
+            logger.error("Task queue failure", extra={
+                "json_fields": {
+                    "event": "task_queue_failure",
+                    "candidate_slug": candidate_slug,
+                    "job_slug": job_slug,
+                    "error": result
+                }
+            })
             return jsonify({
                 "status": "error",
                 "message": "Failed to queue task",
@@ -167,9 +269,16 @@ def webhook_listener(request):
             }), 500
 
     except Exception as e:
-        logger.error(f"❌ Error processing webhook: {e}")
+        # --- ENRICHED LOGGING ---
+        logger.error(f"Error processing webhook: {e}", extra={
+            "json_fields": {
+                "event": "webhook_processing_exception",
+                "error": str(e)
+            }
+        })
         return jsonify({
             "status": "error",
             "message": "Internal server error",
             "error": str(e)
         }), 500
+

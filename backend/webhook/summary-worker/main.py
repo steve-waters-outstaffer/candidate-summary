@@ -11,10 +11,36 @@ import requests
 from flask import jsonify, request
 from google.cloud import firestore
 
-# Configure logging
-logging.basicConfig(stream=sys.stdout, level=logging.INFO,
-                    format='%(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
+# --- NEW: Import the Google Cloud Logging library ---
+try:
+    import google.cloud.logging
+except ImportError:
+    google = None
+    logging.warning("google.cloud.logging not found. Please add 'google-cloud-logging' to requirements.txt")
+
+
+# --- GCP Compliant Structured Logging Setup ---
+try:
+    # Check if the import was successful
+    if 'google.cloud' in sys.modules and hasattr(google, 'cloud') and hasattr(google.cloud, 'logging'):
+        client = google.cloud.logging.Client()
+        handler = client.get_default_handler()
+        root_logger = logging.getLogger()
+        root_logger.handlers.clear()  # Remove existing handlers
+        root_logger.addHandler(handler)
+        root_logger.setLevel(logging.INFO)
+        logger = logging.getLogger(__name__)
+        logger.info("Structured logging initialized successfully.")
+    else:
+        raise Exception("google.cloud.logging module not available.")
+except Exception as e:
+    # Fallback to basic logging if GCP logging fails
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                        format='%(levelname)s: %(message)s')
+    logger = logging.getLogger(__name__)
+    logger.error(f"Failed to initialize GCP structured logging: {e}. Falling back to basicConfig.")
+# --- End of Logging Setup ---
+
 
 # Environment variables
 # --- FIX 1: Updated to the correct, verified Cloud Run URL ---
@@ -50,7 +76,7 @@ def get_dynamic_config():
         doc = doc_ref.get()
         if doc.exists:
             config_data = doc.to_dict()
-            logger.info("✅ Fetched dynamic config from Firestore.")
+            logger.info("Fetched dynamic config from Firestore.")
             # Map Firestore fields to the format generate_summary expects
             # This provides a safe mapping layer.
             return {
@@ -65,10 +91,16 @@ def get_dynamic_config():
                 'auto_push_delay_seconds': config_data.get('auto_push_delay_seconds', FALLBACK_CONFIG['auto_push_delay_seconds'])
             }
         else:
-            logger.warning("⚠️ Firestore config doc 'webhook_config/default' not found. Using fallback.")
+            logger.warning(
+                "Firestore config doc 'webhook_config/default' not found. Using fallback.",
+                extra={"json_fields": {"config_source": "fallback"}}
+            )
             return FALLBACK_CONFIG
     except Exception as e:
-        logger.error(f"❌ Failed to fetch Firestore config: {e}. Using fallback.")
+        logger.error(
+            f"Failed to fetch Firestore config: {e}. Using fallback.",
+            extra={"json_fields": {"error": str(e), "config_source": "fallback"}}
+        )
         return FALLBACK_CONFIG
 
 
@@ -78,21 +110,37 @@ def log_to_firestore(run_data):
         # Use a structured ID for easier querying
         # Format: YYYYMMDD_HHMMSS_CandidateSlug_JobSlug
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        doc_id = f"{timestamp_str}_{run_data['candidate_slug']}_{run_data['job_slug']}"
+        candidate_slug = run_data.get('candidate_slug', 'unknown')
+        job_slug = run_data.get('job_slug', 'unknown')
+        doc_id = f"{timestamp_str}_{candidate_slug}_{job_slug}"
 
         doc_ref = db.collection('candidate_summary_runs').document(doc_id)
         run_data['timestamp'] = firestore.SERVER_TIMESTAMP
         doc_ref.set(run_data)
-        logger.info(f"✅ Logged run to Firestore: {doc_ref.id}")
+        logger.info(
+            "Logged run to Firestore",
+            extra={"json_fields": {"firestore_id": doc_ref.id, "candidate_slug": candidate_slug, "job_slug": job_slug}}
+        )
         return doc_ref.id
     except Exception as e:
-        logger.error(f"❌ Failed to log to Firestore: {e}")
+        logger.error(
+            f"Failed to log to Firestore: {e}",
+            extra={"json_fields": {"error": str(e), "candidate_slug": run_data.get('candidate_slug')}}
+        )
         return None
 
 # --- FIX 2: Updated function to support POST method ---
 def test_endpoint(endpoint_path, candidate_slug, job_slug, endpoint_name, method='GET'):
     """Test an API endpoint and return success status."""
     url = f"{FLASK_APP_URL}{endpoint_path}"
+
+    log_context = {
+        "endpoint_name": endpoint_name,
+        "method": method,
+        "url": url,
+        "candidate_slug": candidate_slug,
+        "job_slug": job_slug
+    }
 
     # Data is sent as JSON for POST, params for GET
     payload = {
@@ -101,7 +149,7 @@ def test_endpoint(endpoint_path, candidate_slug, job_slug, endpoint_name, method
     }
 
     try:
-        logger.info(f"🔍 Testing {endpoint_name} ({method})...")
+        logger.info(f"Testing {endpoint_name} ({method})...", extra={"json_fields": log_context})
 
         if method == 'POST':
             response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
@@ -113,7 +161,10 @@ def test_endpoint(endpoint_path, candidate_slug, job_slug, endpoint_name, method
         data = response.json()
         success = data.get('available', False) or data.get('success', False)
 
-        logger.info(f"{'✅' if success else '⚠️'} {endpoint_name}: {'Available' if success else 'Not available'}")
+        logger.info(
+            f"{endpoint_name}: {'Available' if success else 'Not available'}",
+            extra={"json_fields": {**log_context, "success": success}}
+        )
 
         return {
             'success': success,
@@ -122,21 +173,33 @@ def test_endpoint(endpoint_path, candidate_slug, job_slug, endpoint_name, method
         }
 
     except requests.exceptions.Timeout:
-        logger.error(f"❌ {endpoint_name}: Request timeout")
+        error_msg = 'Request timeout'
+        logger.error(
+            f"{endpoint_name}: {error_msg}",
+            extra={"json_fields": {**log_context, "error": error_msg}}
+        )
         return {
             'success': False,
-            'error': 'Request timeout',
+            'error': error_msg,
             'data': None
         }
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ {endpoint_name}: {str(e)}")
+        error_msg = str(e)
+        logger.error(
+            f"{endpoint_name}: {error_msg}",
+            extra={"json_fields": {**log_context, "error": error_msg}}
+        )
         return {
             'success': False,
-            'error': str(e),
+            'error': error_msg,
             'data': None
         }
     except Exception as e:
-        logger.error(f"❌ {endpoint_name}: Unexpected error: {str(e)}")
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(
+            f"{endpoint_name}: {error_msg}",
+            extra={"json_fields": {**log_context, "error": error_msg}}
+        )
         return {
             'success': False,
             'error': str(e),
@@ -148,6 +211,12 @@ def generate_summary(candidate_slug, job_slug, config):
     """Call the generate summary endpoint."""
     url = f"{FLASK_APP_URL}/api/generate-summary"
 
+    log_context = {
+        "candidate_slug": candidate_slug,
+        "job_slug": job_slug,
+        "prompt_type": config.get('prompt_type')
+    }
+
     payload = {
         'candidate_slug': candidate_slug,
         'job_slug': job_slug,
@@ -158,21 +227,24 @@ def generate_summary(candidate_slug, job_slug, config):
     }
 
     try:
-        logger.info(f"🤖 Generating summary with config: {config}")
+        logger.info(
+            "Generating summary",
+            extra={"json_fields": {**log_context, "config": config}}
+        )
         start_time = time.time()
 
         response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT * 2)  # Double timeout for generation
         response.raise_for_status()
 
         duration = time.time() - start_time
-
-        # --- FIX: Restored the missing code block below ---
         data = response.json()
-
         success = data.get('success', False)
         summary = data.get('summary', '')
 
-        logger.info(f"{'✅' if success else '❌'} Summary generation: {('Complete' if success else 'Failed')} ({duration:.2f}s)")
+        logger.info(
+            f"Summary generation: {'Complete' if success else 'Failed'}",
+            extra={"json_fields": {**log_context, "success": success, "duration_seconds": round(duration, 2)}}
+        )
 
         return {
             'success': success,
@@ -183,30 +255,43 @@ def generate_summary(candidate_slug, job_slug, config):
         }
 
     except requests.exceptions.Timeout:
-        logger.error(f"❌ Summary generation: Request timeout")
+        duration = REQUEST_TIMEOUT * 2
+        error_msg = 'Request timeout'
+        logger.error(
+            f"Summary generation: {error_msg}",
+            extra={"json_fields": {**log_context, "error": error_msg, "duration_seconds": duration}}
+        )
         return {
             'success': False,
             'summary_length': 0,
-            'duration_seconds': REQUEST_TIMEOUT * 2,
-            'error': 'Request timeout',
+            'duration_seconds': duration,
+            'error': error_msg,
             'data': None
         }
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Summary generation failed: {str(e)}")
+        error_msg = str(e)
+        logger.error(
+            f"Summary generation failed: {error_msg}",
+            extra={"json_fields": {**log_context, "error": error_msg}}
+        )
         return {
             'success': False,
             'summary_length': 0,
             'duration_seconds': 0,
-            'error': str(e),
+            'error': error_msg,
             'data': None
         }
     except Exception as e:
-        logger.error(f"❌ Summary generation: Unexpected error: {str(e)}")
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(
+            f"Summary generation: {error_msg}",
+            extra={"json_fields": {**log_context, "error": error_msg}}
+        )
         return {
             'success': False,
             'summary_length': 0,
             'duration_seconds': 0,
-            'error': str(e),
+            'error': error_msg,
             'data': None
         }
     # --- End of restored code block ---
@@ -214,8 +299,9 @@ def generate_summary(candidate_slug, job_slug, config):
 # --- ADDED: Stub function for creating a note ---
 def handle_note_creation(candidate_slug, job_slug, summary_html, triggered_by):
     """(Stub) Creates a tracking note in RecruitCRM."""
+    log_context = {"action": "create_note", "candidate_slug": candidate_slug, "job_slug": job_slug}
     try:
-        logger.info(f"ACTION: Creating tracking note for {candidate_slug}...")
+        logger.info("Creating tracking note (stub)", extra={"json_fields": log_context})
         # TODO: Implement API call to RecruitCRM to create a note
         # Example:
         # note_payload = {
@@ -230,18 +316,25 @@ def handle_note_creation(candidate_slug, job_slug, summary_html, triggered_by):
 
         # Simulating success for now
         time.sleep(0.1) # Simulate network delay
-        logger.info("✅ (Stub) Tracking note created.")
+        logger.info("Tracking note created (stub)", extra={"json_fields": {**log_context, "success": True}})
         return {'success': True, 'error': None, 'message': 'Note created (stub)'}
 
     except Exception as e:
-        logger.error(f"❌ Failed to create tracking note: {e}")
+        error_msg = f"Failed to create tracking note: {e}"
+        logger.error(error_msg, extra={"json_fields": {**log_context, "error": str(e), "success": False}})
         return {'success': False, 'error': str(e), 'message': 'Failed to create note'}
 
 # --- ADDED: Stub function for auto-pushing candidate ---
 def handle_auto_push(candidate_slug, job_slug, delay_seconds, triggered_by):
     """(Stub) Pushes candidate to the next stage."""
+    log_context = {
+        "action": "auto_push",
+        "candidate_slug": candidate_slug,
+        "job_slug": job_slug,
+        "delay_seconds": delay_seconds
+    }
     try:
-        logger.info(f"ACTION: Auto-pushing candidate {candidate_slug} with {delay_seconds}s delay...")
+        logger.info(f"Auto-pushing candidate (stub) with {delay_seconds}s delay...", extra={"json_fields": log_context})
         # TODO: Implement API call to RecruitCRM to push stage
         # Example:
         # push_payload = {
@@ -256,11 +349,12 @@ def handle_auto_push(candidate_slug, job_slug, delay_seconds, triggered_by):
 
         # Simulating success for now
         time.sleep(0.1) # Simulate network delay
-        logger.info("✅ (Stub) Candidate auto-push triggered.")
+        logger.info("Candidate auto-push triggered (stub)", extra={"json_fields": {**log_context, "success": True}})
         return {'success': True, 'error': None, 'message': 'Auto-push triggered (stub)'}
 
     except Exception as e:
-        logger.error(f"❌ Failed to trigger auto-push: {e}")
+        error_msg = f"Failed to trigger auto-push: {e}"
+        logger.error(error_msg, extra={"json_fields": {**log_context, "error": str(e), "success": False}})
         return {'success': False, 'error': str(e), 'message': 'Failed to trigger auto-push'}
 
 
@@ -270,13 +364,24 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
     Mirrors the UI flow from CandidateSummaryGenerator.jsx
     """
 
+    # Base context for all logs in this task
+    base_log_context = {
+        "candidate_slug": candidate_slug,
+        "job_slug": job_slug,
+        **task_metadata
+    }
+
     # --- NEW: Fetch dynamic config at the start of the process ---
     dynamic_config = get_dynamic_config()
 
-    logger.info(f"🚀 Starting summary generation for {candidate_slug} / {job_slug}")
-    logger.info(f"⚙️ Using config (Prompt: {dynamic_config.get('prompt_id')})")
-    if updated_by:
-        logger.info(f"👤 Triggered by: {updated_by.get('first_name')} {updated_by.get('last_name')} ({updated_by.get('email')})")
+    logger.info(
+        "Starting summary generation",
+        extra={"json_fields": {**base_log_context, "triggered_by": updated_by}}
+    )
+    logger.info(
+        "Using config",
+        extra={"json_fields": {**base_log_context, "prompt_id": dynamic_config.get('prompt_type')}}
+    )
 
     # Initialize run data for Firestore logging
     run_data = {
@@ -327,7 +432,8 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
         run_data['candidate_name'] = candidate_test['data'].get('candidate_name', 'N/A')
 
     if not candidate_test['success']:
-        logger.error("❌ BLOCKING: Candidate data not found. Stopping.")
+        error_msg = 'BLOCKING: Candidate data not found. Stopping.'
+        logger.error(error_msg, extra={"json_fields": {**base_log_context, "reason": "candidate_data_not_found"}})
         run_data['generation'] = {
             'success': False,
             'summary_length': 0,
@@ -350,7 +456,8 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
         run_data['job_name'] = job_test['data'].get('job_name', 'N/A')
 
     if not job_test['success']:
-        logger.error("❌ BLOCKING: Job data not found. Stopping.")
+        error_msg = 'BLOCKING: Job data not found. Stopping.'
+        logger.error(error_msg, extra={"json_fields": {**base_log_context, "reason": "job_data_not_found"}})
         run_data['generation'] = {
             'success': False,
             'summary_length': 0,
@@ -394,14 +501,18 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
 
     # Log what sources we have
     sources = [k for k, v in run_data['sources_used'].items() if v]
-    logger.info(f"📦 Available sources: {', '.join(sources) if sources else 'None'}")
+    logger.info(
+        f"Available sources: {', '.join(sources) if sources else 'None'}",
+        extra={"json_fields": {**base_log_context, "sources": sources}}
+    )
 
     # --- ADDED: Logic to check if we should proceed without interviews ---
     has_interview = run_data['sources_used']['anna_ai'] or run_data['sources_used']['quil']
     proceed_without_interview = dynamic_config.get('proceed_without_interview', False)
 
     if not has_interview and not proceed_without_interview:
-        logger.error("❌ BLOCKING: No interview data (Anna/Quil) found and 'proceed_without_interview' is false. Stopping.")
+        error_msg = "BLOCKING: No interview data (Anna/Quil) found and 'proceed_without_interview' is false. Stopping."
+        logger.error(error_msg, extra={"json_fields": {**base_log_context, "reason": "no_interview_data"}})
         run_data['generation'] = {
             'success': False,
             'summary_length': 0,
@@ -411,7 +522,10 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
         log_to_firestore(run_data)
         return False, "No interview data found", run_data
     elif not has_interview:
-        logger.warning("⚠️ No interview data (Anna/Quil) found, but proceeding as 'proceed_without_interview' is true.")
+        logger.warning(
+            "No interview data (Anna/Quil) found, but proceeding as 'proceed_without_interview' is true.",
+            extra={"json_fields": {**base_log_context, "warning": "proceeding_without_interview"}}
+        )
     # --- End of new logic ---
 
 
@@ -428,7 +542,10 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
 
     # --- UPDATED: This section now runs AFTER generation but BEFORE logging ---
     if generation_result['success']:
-        logger.info(f"✅ Summary generation complete. Checking post-actions...")
+        logger.info(
+            "Summary generation complete. Checking post-actions...",
+            extra={"json_fields": base_log_context}
+        )
 
         # Check if note creation is enabled
         if dynamic_config.get('create_tracking_note'):
@@ -440,7 +557,7 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
             )
             run_data['post_actions']['note_creation'] = note_result
         else:
-            logger.info("⏭️ Skipping note creation (disabled in config).")
+            logger.info("Skipping note creation (disabled in config).", extra={"json_fields": base_log_context})
 
         # Check if auto-push is enabled
         if dynamic_config.get('auto_push'):
@@ -452,20 +569,29 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
             )
             run_data['post_actions']['auto_push'] = push_result
         else:
-            logger.info("⏭️ Skipping auto-push (disabled in config).")
+            logger.info("Skipping auto-push (disabled in config).", extra={"json_fields": base_log_context})
 
     else:
-        logger.error(f"❌ Summary generation failed: {generation_result['error']}")
+        logger.error(
+            f"Summary generation failed: {generation_result['error']}",
+            extra={"json_fields": {**base_log_context, "error": generation_result['error']}}
+        )
 
     # Log to Firestore (now includes post_action results)
     firestore_id = log_to_firestore(run_data)
     run_data['firestore_id'] = firestore_id # Add ID to return data
 
     if generation_result['success']:
-        logger.info(f"✅ Process complete. Firestore ID: {firestore_id}")
+        logger.info(
+            f"Process complete. Firestore ID: {firestore_id}",
+            extra={"json_fields": {**base_log_context, "success": True, "firestore_id": firestore_id}}
+        )
         return True, "Summary generated successfully", run_data
     else:
-        logger.error(f"❌ Process failed. Firestore ID: {firestore_id}")
+        logger.error(
+            f"Process failed. Firestore ID: {firestore_id}",
+            extra={"json_fields": {**base_log_context, "success": False, "firestore_id": firestore_id}}
+        )
         return False, generation_result['error'], run_data
 
 
@@ -475,10 +601,12 @@ def summary_worker(request):
     Triggered by Cloud Tasks queue.
     """
 
-    logger.info("--- Summary Worker Invoked ---")
+    logger.info("Summary Worker Invoked")
+    payload = {} # Initialize payload for error logging
 
     # Validate method
     if request.method != 'POST':
+        logger.warning("Method Not Allowed", extra={"json_fields": {"method": request.method}})
         return jsonify({"error": "Method Not Allowed"}), 405
 
     try:
@@ -486,7 +614,7 @@ def summary_worker(request):
         payload = request.get_json(silent=True)
 
         if not payload:
-            logger.error("❌ No JSON payload received")
+            logger.error("No JSON payload received", extra={"json_fields": {"error": "Invalid payload"}})
             return jsonify({"error": "Invalid payload"}), 400
 
         # Extract required fields
@@ -498,7 +626,10 @@ def summary_worker(request):
         updated_by = webhook_payload.get('updated_by')
 
         if not candidate_slug or not job_slug:
-            logger.error("❌ Missing required fields")
+            logger.error(
+                "Missing required fields",
+                extra={"json_fields": {"error": "Missing required fields", "payload": payload}}
+            )
             return jsonify({
                 "error": "Missing required fields",
                 "required": ["candidate_slug", "job_slug"]
@@ -510,8 +641,16 @@ def summary_worker(request):
             'retry_attempt': int(request.headers.get('X-CloudTasks-TaskRetryCount', 0))
         }
 
-        logger.info(f"📋 Processing task: {candidate_slug} / {job_slug}")
-        logger.info(f"🔄 Retry attempt: {task_metadata['retry_attempt']}")
+        # This is now the primary log message for a task
+        logger.info("Processing summary task", extra={
+            "json_fields": {
+                "candidate_slug": candidate_slug,
+                "job_slug": job_slug,
+                "cloud_task_id": task_metadata.get('cloud_task_id'),
+                "retry_attempt": task_metadata.get('retry_attempt'),
+                "triggered_by": updated_by
+            }
+        })
 
         # Process the task
         success, message, run_data = process_summary_task(
@@ -543,7 +682,14 @@ def summary_worker(request):
             }), status_code
 
     except Exception as e:
-        logger.error(f"❌ Worker error: {str(e)}")
+        logger.error(
+            f"Worker error: {str(e)}",
+            extra={"json_fields": {
+                "error": str(e),
+                "candidate_slug": payload.get('candidate_slug'),
+                "job_slug": payload.get('job_slug')
+            }}
+        )
         return jsonify({
             "status": "error",
             "message": "Internal server error",
@@ -551,4 +697,3 @@ def summary_worker(request):
         }), 500
 
 # --- FIX: Removed the extra '}' that was causing a SyntaxError ---
-
