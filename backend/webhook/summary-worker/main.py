@@ -405,7 +405,8 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
         'post_actions': {
             'note_creation': None,
             'auto_push': None
-        }
+        },
+        'prompt_sources': {}
     }
 
     # --- Add top-level fields for easier querying in Firestore ---
@@ -499,10 +500,10 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
             run_data['tests']['quil_interview']['note_id'] = note_id
             run_data['sources_used']['quil'] = True
 
-    # Log what sources we have
+    # Log what sources we have before generation
     sources = [k for k, v in run_data['sources_used'].items() if v]
     logger.info(
-        f"Available sources: {', '.join(sources) if sources else 'None'}",
+        "Source availability check complete",
         extra={"json_fields": {**base_log_context, "sources": sources}}
     )
 
@@ -534,6 +535,30 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
     generation_result = generate_summary(candidate_slug, job_slug, dynamic_config)
     run_data['generation'] = generation_result
     run_data['success'] = generation_result['success'] # Update top-level success
+
+    # Capture the sources confirmed by the generation endpoint
+    prompt_sources = {}
+    if generation_result.get('data'):
+        raw_sources = generation_result['data'].get('sources_used') or {}
+        if isinstance(raw_sources, dict):
+            prompt_sources = {k: bool(v) for k, v in raw_sources.items()}
+            run_data['prompt_sources'] = prompt_sources
+
+            # Merge prompt confirmed sources into top-level sources_used tracker
+            for source_key, was_used in prompt_sources.items():
+                if was_used and source_key in run_data['sources_used']:
+                    run_data['sources_used'][source_key] = True
+
+    if prompt_sources:
+        logger.info(
+            "Prompt sources confirmed",
+            extra={"json_fields": {**base_log_context, "prompt_sources": prompt_sources}}
+        )
+    elif generation_result['success']:
+        logger.warning(
+            "Prompt sources not reported",
+            extra={"json_fields": {**base_log_context, "prompt_sources_present": False}}
+        )
 
     # --- Add summary html to top level for display in Firestore ---
     # --- FIX: Changed 'generation_config' to 'generation_result' ---

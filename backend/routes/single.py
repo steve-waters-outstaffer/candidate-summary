@@ -381,10 +381,42 @@ def generate_summary():
                 if raw_transcript:
                     fireflies_data = normalise_fireflies_transcript(raw_transcript)
 
+        # Track which sources will be sent to the prompt/generation step
+        prompt_sources = {
+            'resume': bool(gemini_resume_file),
+            'anna_ai': bool(interview_data),
+            'quil': bool(quil_data and quil_data.get('summary_html')),
+            'fireflies': bool(fireflies_data),
+            'additional_context': bool(additional_context.strip()) if isinstance(additional_context, str) else bool(additional_context)
+        }
+
+        log.info(
+            "single.generate_summary.prompt_sources",
+            candidate_slug=candidate_slug,
+            job_slug=job_slug,
+            prompt_type=prompt_type,
+            sources_used=prompt_sources
+        )
+
+        if prompt_sources['quil']:
+            log.info(
+                "single.generate_summary.using_quil_summary",
+                candidate_slug=candidate_slug,
+                job_slug=job_slug,
+                prompt_type=prompt_type,
+                quil_summary_present=True
+            )
+
         html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, quil_data, gemini_resume_file, client)
 
         if html_summary:
-            return jsonify({'success': True, 'html_summary': html_summary, 'candidate_slug': candidate_slug})
+            return jsonify({
+                'success': True,
+                'html_summary': html_summary,
+                'candidate_slug': candidate_slug,
+                'sources_used': prompt_sources,
+                'quil_summary_used': prompt_sources['quil']
+            })
         else:
             return jsonify({'error': 'Failed to generate summary from AI model'}), 500
 
