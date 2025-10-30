@@ -23,7 +23,9 @@ try:
         get_recruitcrm_headers,
         fetch_recruitcrm_candidate_job_specific_fields,
         fetch_candidate_interview_id,
-        fetch_candidate_notes
+        fetch_candidate_notes,
+        create_recruitcrm_note,
+        create_recruitcrm_note
     )
     log.info("routes.single: Successfully imported from helpers.recruitcrm_helpers.")
 
@@ -459,6 +461,41 @@ def push_to_recruitcrm():
     except Exception as e:
         log.error("single.push_to_recruitcrm.exception", error=str(e))
         return jsonify({'error': str(e)}), 500
+
+
+# --- NEW SIMPLIFIED ROUTE ---
+@single_bp.route('/create-note', methods=['POST'])
+def create_note():
+    """
+    Creates a new note in RecruitCRM using slugs.
+    This is called by the summary worker.
+    """
+    log.info("single.create_note.hit")
+    data = request.get_json()
+    candidate_slug = data.get('candidate_slug')
+    job_slug = data.get('job_slug')
+    note_html = data.get('note_html')
+
+    if not all([candidate_slug, job_slug, note_html]):
+        return jsonify({'error': 'Missing candidate_slug, job_slug, or note_html'}), 400
+
+    try:
+        # We no longer need to fetch IDs. We pass the slugs directly.
+        note_result = create_recruitcrm_note(candidate_slug, job_slug, note_html)
+
+        if note_result:
+            log.info("single.create_note.success",
+                     candidate_slug=candidate_slug,
+                     job_slug=job_slug)
+            return jsonify({'success': True, 'message': 'Note created successfully'})
+        else:
+            return jsonify({'error': 'Failed to create note in RecruitCRM'}), 500
+
+    except Exception as e:
+        log.error("single.create_note.exception", error=str(e), exc_info=True)
+        return jsonify({'error': str(e)}), 500
+# --- END OF NEW ROUTE ---
+
 
 @single_bp.route('/create-gmail-draft', methods=['POST'])
 def create_gmail_draft_route():

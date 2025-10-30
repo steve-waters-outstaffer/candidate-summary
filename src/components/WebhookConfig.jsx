@@ -23,7 +23,7 @@ const WebhookConfig = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [alert, setAlert] = useState({ show: false, type: 'info', message: '' });
-    
+
     // Config state
     const [config, setConfig] = useState({
         enabled: true,
@@ -37,7 +37,9 @@ const WebhookConfig = () => {
         auto_push_delay_seconds: 0,
         create_tracking_note: false,
         max_concurrent_tasks: 5,
-        rate_limit_per_minute: 10
+        rate_limit_per_minute: 10,
+        push_summary_to_candidate: false, // <-- ADDED
+        move_to_next_stage: false         // <-- ADDED
     });
 
     // Available prompts from database
@@ -56,7 +58,8 @@ const WebhookConfig = () => {
             const response = await fetch(`${API_BASE_URL}/api/webhook-config`);
             if (!response.ok) throw new Error('Failed to load config');
             const data = await response.json();
-            setConfig(data);
+            // Merge loaded data with defaults to ensure all fields are present
+            setConfig(prev => ({ ...prev, ...data }));
             showAlert('success', 'Configuration loaded');
         } catch (error) {
             showAlert('error', `Failed to load config: ${error.message}`);
@@ -84,9 +87,9 @@ const WebhookConfig = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             });
-            
+
             if (!response.ok) throw new Error('Failed to save config');
-            
+
             showAlert('success', 'Configuration saved successfully');
         } catch (error) {
             showAlert('error', `Failed to save config: ${error.message}`);
@@ -309,6 +312,50 @@ const WebhookConfig = () => {
                                     </Typography>
                                     <Typography variant="body2" color="text.secondary">
                                         Automatically create a note in RecruitCRM with the generated summary after generation completes
+                                    </Typography>
+                                </Box>
+                            }
+                        />
+                    </Paper>
+
+                    {/* --- ADDED FIELD --- */}
+                    <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
+                        <FormControlLabel
+                            control={
+                                <Switch
+                                    checked={config.push_summary_to_candidate}
+                                    onChange={(e) => handleChange('push_summary_to_candidate', e.target.checked)}
+                                />
+                            }
+                            label={
+                                <Box>
+                                    <Typography variant="body1" fontWeight="medium">
+                                        Push Summary to Candidate Field
+                                    </Typography>
+                                    <Typography variant="body2" color="text.secondary">
+                                        Automatically push the generated summary to the candidate's "Summary" field in RecruitCRM
+                                    </Typography>
+                                </Box>
+                            }
+                        />
+                    </Paper>
+
+                    {/* --- ADDED FIELD --- */}
+                    <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
+                        <FormControlLabel
+                            control={
+                                <Switch
+                                    checked={config.move_to_next_stage}
+                                    onChange={(e) => handleChange('move_to_next_stage', e.target.checked)}
+                                />
+                            }
+                            label={
+                                <Box>
+                                    <Typography variant="body1" fontWeight="medium">
+                                        Move to Next Stage (Legacy)
+                                    </Typography>
+                                    <Typography variant="body2" color="text.secondary">
+                                        (Legacy) Automatically move the candidate to the next stage. Please use "Auto-Push" instead.
                                     </Typography>
                                 </Box>
                             }

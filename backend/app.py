@@ -35,7 +35,7 @@ CORS(app,
          "http://localhost:5174"
          # Local development (Create React App)
      ],
-     methods=["GET", "POST", "OPTIONS"],
+     methods=["GET", "POST", "OPTIONS", "PUT", "PATCH", "DELETE"],
      allow_headers=["Content-Type", "Authorization"],
      supports_credentials=True
      )

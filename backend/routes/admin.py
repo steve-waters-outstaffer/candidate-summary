@@ -154,7 +154,7 @@ def get_webhook_config():
     try:
         db = current_app.db
         doc = db.collection('webhook_config').document('default').get()
-        
+
         if not doc.exists:
             # Return default config if not found
             default_config = {
@@ -169,15 +169,17 @@ def get_webhook_config():
                 'auto_push_delay_seconds': 0,
                 'create_tracking_note': False,
                 'max_concurrent_tasks': 5,
-                'rate_limit_per_minute': 10
+                'rate_limit_per_minute': 10,
+                'push_summary_to_candidate': False, # <-- ADDED
+                'move_to_next_stage': False         # <-- ADDED
             }
             log.info("admin.get_webhook_config.using_defaults")
             return jsonify(default_config), 200
-        
+
         data = doc.to_dict()
         log.info("admin.get_webhook_config.success")
         return jsonify(data), 200
-        
+
     except Exception as e:
         log.error("admin.get_webhook_config.error", error=str(e))
         return jsonify({'error': str(e)}), 500
@@ -189,30 +191,32 @@ def update_webhook_config():
     try:
         db = current_app.db
         data = request.json
-        
+
         # Validate required fields
         allowed_fields = [
-            'enabled', 'default_prompt_id', 'prompt_category', 'use_quil', 
+            'enabled', 'default_prompt_id', 'prompt_category', 'use_quil',
             'use_fireflies', 'proceed_without_interview', 'additional_context',
             'auto_push', 'auto_push_delay_seconds', 'create_tracking_note',
-            'max_concurrent_tasks', 'rate_limit_per_minute'
+            'max_concurrent_tasks', 'rate_limit_per_minute',
+            'push_summary_to_candidate', # <-- ADDED
+            'move_to_next_stage'         # <-- ADDED
         ]
-        
+
         update_data = {}
         for field in allowed_fields:
             if field in data:
                 update_data[field] = data[field]
-        
+
         # Add metadata
         update_data['updated_at'] = datetime.utcnow().isoformat() + 'Z'
         update_data['updated_by'] = 'admin_ui'
-        
+
         # Update or create the config
         db.collection('webhook_config').document('default').set(update_data, merge=True)
-        
+
         log.info("admin.update_webhook_config.success", fields=list(update_data.keys()))
         return jsonify({'success': True, 'message': 'Configuration updated'}), 200
-        
+
     except Exception as e:
         log.error("admin.update_webhook_config.error", error=str(e))
         return jsonify({'error': str(e)}), 500
@@ -224,38 +228,38 @@ def get_summary_runs():
     """Get summary generation runs"""
     try:
         db = current_app.db
-        
+
         # Get optional query parameters
         limit_count = int(request.args.get('limit', 50))
         candidate_filter = request.args.get('candidate', '')
         job_filter = request.args.get('job', '')
-        
+
         # Query Firestore
         runs_ref = db.collection('candidate_summary_runs').order_by('timestamp', direction='DESCENDING').limit(limit_count)
         docs = runs_ref.stream()
-        
+
         runs = []
         for doc in docs:
             data = doc.to_dict()
-            
+
             # Apply filters if provided
             if candidate_filter and candidate_filter.lower() not in (data.get('candidate_name', '') or '').lower():
                 continue
             if job_filter and job_filter.lower() not in (data.get('job_name', '') or '').lower():
                 continue
-            
+
             # Convert timestamp to ISO string if it exists
             if 'timestamp' in data and data['timestamp']:
                 data['timestamp'] = data['timestamp'].isoformat() if hasattr(data['timestamp'], 'isoformat') else str(data['timestamp'])
-            
+
             runs.append({
                 'id': doc.id,
                 **data
             })
-        
+
         log.info("admin.get_summary_runs.success", count=len(runs))
         return jsonify({'success': True, 'runs': runs}), 200
-        
+
     except Exception as e:
         log.error("admin.get_summary_runs.error", error=str(e))
         return jsonify({'success': False, 'error': str(e)}), 500

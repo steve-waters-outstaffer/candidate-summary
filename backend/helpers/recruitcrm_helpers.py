@@ -18,6 +18,8 @@ def get_recruitcrm_headers():
         'Accept': 'application/json'
     }
 
+
+
 def get_alpharun_headers():
     """Returns the authorization headers for the AlphaRun API."""
     log.info("recruitcrm.get_alpharun_headers.called")
@@ -184,3 +186,39 @@ def fetch_candidate_notes(candidate_slug):
                  candidate_slug=candidate_slug, 
                  error=str(e))
         return []
+
+# --- NEW SLUG-BASED VERSION ---
+def create_recruitcrm_note(candidate_slug, job_slug, note_content):
+    """
+    Creates a new note associated with a candidate and a job using SLUGS.
+    Based on the "Note Object" documentation.
+    """
+    log.info("recruitcrm.create_recruitcrm_note.called",
+             candidate_slug=candidate_slug, job_slug=job_slug)
+
+    url = "https://api.recruitcrm.io/v1/notes"
+
+    # Payload based on the new screenshot (image_a076be.png)
+    payload = {
+        "note_type_id": 1,  # Using the example "1" from the docs
+        "description": note_content,
+        "related_to": candidate_slug,
+        "related_to_type": "candidate",
+        "associated_jobs": job_slug  # API doc says comma-separated, but one is fine
+    }
+
+    try:
+        response = requests.post(url, headers=get_recruitcrm_headers(), json=payload)
+        response.raise_for_status()
+        log.info("recruitcrm.create_recruitcrm_note.success",
+                 candidate_slug=candidate_slug, job_slug=job_slug)
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        # Log the payload if we get a 422 error again
+        if e.response is not None and e.response.status_code == 422:
+            log.error("recruitcrm.create_recruitcrm_note.failed_422",
+                      error=str(e), payload_sent=payload)
+        else:
+            log.error("recruitcrm.create_recruitcrm_note.failed",
+                      error=str(e))
+        return None
