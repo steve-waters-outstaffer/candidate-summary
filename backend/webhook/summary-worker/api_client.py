@@ -266,24 +266,46 @@ def handle_note_creation(candidate_slug, job_slug, note_html, triggered_by):
         return {'success': False, 'error': str(e), 'message': 'Failed to create note'}
 
 
-# --- REFACTORED: Renamed from handle_auto_push ---
+# --- REPLACE THE STUB WITH THIS ---
 def handle_stage_move(candidate_slug, job_slug, delay_seconds, triggered_by):
-    """(Stub) Pushes candidate to the next stage."""
+    """Triggers the API to move the candidate to the next stage."""
     log_context = {
-        "action": "move_stage", # Updated action name
+        "action": "move_stage",
         "candidate_slug": candidate_slug,
         "job_slug": job_slug,
         "delay_seconds": delay_seconds
     }
+
+    # This is the new endpoint we will create in single.py
+    url = f"{FLASK_APP_URL}/api/move-stage"
+
+    payload = {
+        'candidate_slug': candidate_slug,
+        'job_slug': job_slug,
+        'triggered_by_email': triggered_by.get('email') if triggered_by else None
+        # Note: We don't send the delay. The API will handle the logic.
+    }
+
     try:
-        logger.info(f"Moving candidate stage (stub) with {delay_seconds}s delay...", extra={"json_fields": log_context})
-        # TODO: Implement API call to e.g., /api/move-stage
+        logger.info(f"Triggering candidate stage move...", extra={"json_fields": log_context})
 
-        time.sleep(0.1) # Simulate network delay
-        logger.info("Candidate stage move triggered (stub)", extra={"json_fields": {**log_context, "success": True}})
-        return {'success': True, 'error': None, 'message': 'Stage move triggered (stub)'}
+        response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
 
-    except Exception as e:
+        if data.get('success'):
+            log.info(f"✅ Candidate stage move triggered successfully: {data.get('message', '')}", extra={"json_fields": {**log_context, "success": True}})
+            return {'success': True, 'error': None, 'message': data.get('message', 'Stage move triggered')}
+        else:
+            error_msg = data.get('error', 'API returned success=false')
+            logger.error(f"Failed to trigger stage move: {error_msg}", extra={"json_fields": {**log_context, "error": error_msg, "success": False}})
+            return {'success': False, 'error': error_msg, 'message': 'Failed to trigger stage move'}
+
+    except requests.exceptions.RequestException as e:
         error_msg = f"Failed to trigger stage move: {e}"
+        logger.error(error_msg, extra={"json_fields": {**log_context, "error": str(e), "success": False}})
+        return {'success': False, 'error': str(e), 'message': 'Failed to trigger stage move'}
+    except Exception as e:
+        error_msg = f"Unexpected error in stage move: {e}"
         logger.error(error_msg, extra={"json_fields": {**log_context, "error": str(e), "success": False}})
         return {'success': False, 'error': str(e), 'message': 'Failed to trigger stage move'}

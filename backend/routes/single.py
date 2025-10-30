@@ -25,7 +25,7 @@ try:
         fetch_candidate_interview_id,
         fetch_candidate_notes,
         create_recruitcrm_note,
-        create_recruitcrm_note
+        set_candidate_stage_by_slug
     )
     log.info("routes.single: Successfully imported from helpers.recruitcrm_helpers.")
 
@@ -493,6 +493,42 @@ def create_note():
 
     except Exception as e:
         log.error("single.create_note.exception", error=str(e), exc_info=True)
+        return jsonify({'error': str(e)}), 500
+# --- END OF NEW ROUTE ---
+
+# --- ADD THIS NEW ROUTE ---
+@single_bp.route('/move-stage', methods=['POST'])
+def move_stage():
+    """
+    Moves a candidate to the "AI Summary - Generated" stage.
+    """
+    log.info("single.move_stage.hit")
+    data = request.get_json()
+    candidate_slug = data.get('candidate_slug')
+    job_slug = data.get('job_slug')
+
+    # This is the hard-coded target stage ID you specified
+    TARGET_STATUS_ID = 726195
+
+    if not candidate_slug or not job_slug:
+        return jsonify({'error': 'Missing candidate_slug or job_slug'}), 400
+
+    try:
+        # Call the new helper with slugs and the target ID
+        move_result = set_candidate_stage_by_slug(candidate_slug, job_slug, TARGET_STATUS_ID)
+
+        if move_result:
+            new_stage_label = move_result.get('status', {}).get('label', 'Unknown')
+            log.info("single.move_stage.success",
+                     candidate_slug=candidate_slug,
+                     job_slug=job_slug,
+                     new_stage=new_stage_label)
+            return jsonify({'success': True, 'message': f'Moved to {new_stage_label}'})
+        else:
+            return jsonify({'error': 'Failed to update candidate stage in RecruitCRM'}), 500
+
+    except Exception as e:
+        log.error("single.move_stage.exception", error=str(e), exc_info=True)
         return jsonify({'error': str(e)}), 500
 # --- END OF NEW ROUTE ---
 

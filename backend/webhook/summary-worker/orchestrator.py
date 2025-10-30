@@ -232,6 +232,7 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
             extra={"json_fields": {**base_log_context, "prompt_sources_present": False}}
         )
 
+    # --- THIS FIX IS WORKING ---
     if generation_result['success'] and generation_result['data']:
         run_data['summary_html'] = generation_result['data'].get('html_summary', '')
 
@@ -257,27 +258,28 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
         # Action 2: Create Note (using new flag and new stub)
         if dynamic_config.get('create_tracking_note'):
 
-            # --- Build the note content here ---
+            # --- FIX: Build the note as PLAIN TEXT ---
             # Get a list of sources that were successfully tested and used
             sources = [k.replace('_', ' ').title() for k, v in run_data['sources_used'].items() if v]
             trigger_email = (updated_by.get('email', 'Unknown') if updated_by else 'System')
 
-            note_html = (
-                f"<h3>🤖 AI Summary Run - Report</h3>"
-                f"<p><strong>Status:</strong> Success</p>"
-                f"<p><strong>Candidate:</strong> {run_data.get('candidate_name', 'N/A')}</p>"
-                f"<p><strong>Job:</strong> {run_data.get('job_name', 'N/A')}</p>"
-                f"<p><strong>Prompt Used:</strong> <code>{run_data.get('prompt_id', 'unknown')}</code></p>"
-                f"<p><strong>Sources Used:</strong> {', '.join(sources) or 'None'}</p>"
-                f"<p><strong>Triggered by:</strong> {trigger_email}</p>"
-                f"<p><em>This is an automated note from the AI Summary Worker.</em></p>"
+            # Changed from HTML to plain text with newlines
+            note_text = (
+                "🤖 AI Summary Run - Report\n"
+                f"Status: Success\n"
+                f"Candidate: {run_data.get('candidate_name', 'N/A')}\n"
+                f"Job: {run_data.get('job_name', 'N/A')}\n"
+                f"Prompt Used: {run_data.get('prompt_id', 'unknown')}\n"
+                f"Sources Used: {', '.join(sources) or 'None'}\n"
+                f"Triggered by: {trigger_email}\n\n"
+                "This is an automated note from the AI Summary Worker."
             )
             # --- End of note content ---
 
             note_result = api_client.handle_note_creation(
                 candidate_slug,
                 job_slug,
-                note_html, # Pass the generated HTML
+                note_text, # Pass the plain text
                 updated_by
             )
             run_data['post_actions']['note_creation'] = note_result

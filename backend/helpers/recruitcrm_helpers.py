@@ -187,38 +187,66 @@ def fetch_candidate_notes(candidate_slug):
                  error=str(e))
         return []
 
-# --- NEW SLUG-BASED VERSION ---
+# --- NEW MINIMALIST FIX ---
+# Based on your successful Postman test
 def create_recruitcrm_note(candidate_slug, job_slug, note_content):
     """
-    Creates a new note associated with a candidate and a job using SLUGS.
-    Based on the "Note Object" documentation.
+    Creates a new note associated with a candidate using the minimal required payload.
     """
     log.info("recruitcrm.create_recruitcrm_note.called",
              candidate_slug=candidate_slug, job_slug=job_slug)
 
     url = "https://api.recruitcrm.io/v1/notes"
 
-    # Payload based on the new screenshot (image_a076be.png)
+    # --- UPDATED MINIMAL PAYLOAD ---
+    # Using only the fields from your test
     payload = {
-        "note_type_id": 1,  # Using the example "1" from the docs
-        "description": note_content,
+        "description": note_content,       # <-- This will be the plain text from orchestrator.py
         "related_to": candidate_slug,
-        "related_to_type": "candidate",
-        "associated_jobs": job_slug  # API doc says comma-separated, but one is fine
+        "related_to_type": "candidate"
+        # We are intentionally omitting associated_jobs, note_type_id, etc.,
+        # as they are not in your minimal test and may be causing the 422 error.
     }
+    # --- END OF UPDATED PAYLOAD ---
 
     try:
         response = requests.post(url, headers=get_recruitcrm_headers(), json=payload)
         response.raise_for_status()
         log.info("recruitcrm.create_recruitcrm_note.success",
-                 candidate_slug=candidate_slug, job_slug=job_slug)
+                 candidate_slug=candidate_slug)
         return response.json()
     except requests.exceptions.RequestException as e:
-        # Log the payload if we get a 422 error again
         if e.response is not None and e.response.status_code == 422:
             log.error("recruitcrm.create_recruitcrm_note.failed_422",
                       error=str(e), payload_sent=payload)
         else:
             log.error("recruitcrm.create_recruitcrm_note.failed",
                       error=str(e))
+        return None
+
+    # --- ADD THIS NEW FUNCTION ---
+def set_candidate_stage_by_slug(candidate_slug, job_slug, new_status_id):
+    """Sets a candidate's stage for a specific job using slugs."""
+    log.info("recruitcrm.set_candidate_stage.called",
+             candidate_slug=candidate_slug, job_slug=job_slug, new_status_id=new_status_id)
+
+    # This URL is from your Postman test
+    url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}/hiring-stages/{job_slug}"
+
+    # This payload is based on your test. We'll set 'updated_by' to 0 for 'system'.
+    payload = {
+        "status_id": new_status_id,
+        "updated_by": 0
+    }
+
+    try:
+        response = requests.post(url, headers=get_recruitcrm_headers(), json=payload)
+        response.raise_for_status()
+        data = response.json()
+        log.info("recruitcrm.set_candidate_stage.success",
+                 candidate_slug=candidate_slug, job_slug=job_slug, new_stage=data.get('status', {}).get('label'))
+        return data
+    except requests.exceptions.RequestException as e:
+        log.error("recruitcrm.set_candidate_stage.failed",
+                  candidate_slug=candidate_slug, job_slug=job_slug, error=str(e))
         return None
