@@ -247,6 +247,10 @@ def set_candidate_stage_by_slug(candidate_slug, job_slug, new_status_id):
                  candidate_slug=candidate_slug, job_slug=job_slug, new_stage=data.get('status', {}).get('label'))
         return data
     except requests.exceptions.RequestException as e:
-        log.error("recruitcrm.set_candidate_stage.failed",
-                  candidate_slug=candidate_slug, job_slug=job_slug, error=str(e))
+        log.error(
+            "recruitcrm.set_candidate_stage.failed",
+            candidate_slug=candidate_slug,
+            job_slug=job_slug,
+            error=str(e)
+        )
         return None

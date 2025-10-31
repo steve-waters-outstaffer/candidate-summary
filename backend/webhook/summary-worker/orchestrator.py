@@ -23,6 +23,23 @@ def get_dynamic_config():
             # This makes sure we get a value even if it's not in the fallback dict.
             fallback_stage_id = FALLBACK_CONFIG.get('target_stage_id', 726195)
 
+            # Support both the new "target_stage_id" field and the older
+            # "target_status_id" field name to keep backwards compatibility.
+            raw_stage_id = config_data.get('target_stage_id')
+            if raw_stage_id is None:
+                raw_stage_id = config_data.get('target_status_id')
+            if raw_stage_id is None:
+                raw_stage_id = fallback_stage_id
+
+            try:
+                target_stage_id = int(raw_stage_id)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid target_stage_id in config. Falling back to default.",
+                    extra={"json_fields": {"raw_target_stage_id": raw_stage_id}}
+                )
+                target_stage_id = fallback_stage_id
+
             return {
                 'use_quil': config_data.get('use_quil', FALLBACK_CONFIG['use_quil']),
                 'include_fireflies': config_data.get('use_fireflies', FALLBACK_CONFIG['include_fireflies']),
@@ -38,7 +55,7 @@ def get_dynamic_config():
                 'auto_push_delay_seconds': config_data.get('auto_push_delay_seconds', FALLBACK_CONFIG['auto_push_delay_seconds']),
 
                 # --- EDIT: Add the new target_stage_id config value ---
-                'target_stage_id': config_data.get('target_stage_id', fallback_stage_id)
+                'target_stage_id': target_stage_id
             }
         else:
             logger.warning(

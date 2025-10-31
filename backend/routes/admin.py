@@ -171,7 +171,8 @@ def get_webhook_config():
                 'max_concurrent_tasks': 5,
                 'rate_limit_per_minute': 10,
                 'push_summary_to_candidate': False, # <-- ADDED
-                'move_to_next_stage': False         # <-- ADDED
+                'move_to_next_stage': False,        # <-- ADDED
+                'target_stage_id': 726195
             }
             log.info("admin.get_webhook_config.using_defaults")
             return jsonify(default_config), 200
@@ -199,7 +200,8 @@ def update_webhook_config():
             'auto_push', 'auto_push_delay_seconds', 'create_tracking_note',
             'max_concurrent_tasks', 'rate_limit_per_minute',
             'push_summary_to_candidate', # <-- ADDED
-            'move_to_next_stage'         # <-- ADDED
+            'move_to_next_stage',        # <-- ADDED
+            'target_stage_id'
         ]
 
         update_data = {}
