@@ -19,6 +19,10 @@ def get_dynamic_config():
             logger.info("Fetched dynamic config from Firestore.")
 
             # --- REFACTORED: Map new Firestore field names ---
+            # --- EDIT: Use .get on FALLBACK_CONFIG and provide a final default ---
+            # This makes sure we get a value even if it's not in the fallback dict.
+            fallback_stage_id = FALLBACK_CONFIG.get('target_stage_id', 726195)
+
             return {
                 'use_quil': config_data.get('use_quil', FALLBACK_CONFIG['use_quil']),
                 'include_fireflies': config_data.get('use_fireflies', FALLBACK_CONFIG['include_fireflies']),
@@ -31,7 +35,10 @@ def get_dynamic_config():
                 'create_tracking_note': config_data.get('create_tracking_note', FALLBACK_CONFIG['create_tracking_note']),
                 'move_to_next_stage': config_data.get('move_to_next_stage', FALLBACK_CONFIG['move_to_next_stage']),
 
-                'auto_push_delay_seconds': config_data.get('auto_push_delay_seconds', FALLBACK_CONFIG['auto_push_delay_seconds'])
+                'auto_push_delay_seconds': config_data.get('auto_push_delay_seconds', FALLBACK_CONFIG['auto_push_delay_seconds']),
+
+                # --- EDIT: Add the new target_stage_id config value ---
+                'target_stage_id': config_data.get('target_stage_id', fallback_stage_id)
             }
         else:
             logger.warning(
@@ -288,9 +295,14 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
 
         # Action 3: Move Stage (using new flag and function name)
         if dynamic_config.get('move_to_next_stage'):
+
+            # --- EDIT: Get the target_stage_id from config, with a fallback ---
+            target_stage_id = dynamic_config.get('target_stage_id', 726195)
+
             push_result = api_client.handle_stage_move(
                 candidate_slug,
                 job_slug,
+                target_stage_id,  # --- EDIT: Pass the ID here ---
                 dynamic_config.get('auto_push_delay_seconds', 0),
                 updated_by
             )

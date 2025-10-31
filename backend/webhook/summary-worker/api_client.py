@@ -267,13 +267,15 @@ def handle_note_creation(candidate_slug, job_slug, note_html, triggered_by):
 
 
 # --- REPLACE THE STUB WITH THIS ---
-def handle_stage_move(candidate_slug, job_slug, delay_seconds, triggered_by):
+# --- EDIT: Add target_stage_id to the function definition ---
+def handle_stage_move(candidate_slug, job_slug, target_stage_id, delay_seconds, triggered_by):
     """Triggers the API to move the candidate to the next stage."""
     log_context = {
         "action": "move_stage",
         "candidate_slug": candidate_slug,
         "job_slug": job_slug,
-        "delay_seconds": delay_seconds
+        "delay_seconds": delay_seconds,
+        "target_stage_id": target_stage_id  # --- EDIT: Add ID to logs ---
     }
 
     # This is the new endpoint we will create in single.py
@@ -282,6 +284,7 @@ def handle_stage_move(candidate_slug, job_slug, delay_seconds, triggered_by):
     payload = {
         'candidate_slug': candidate_slug,
         'job_slug': job_slug,
+        'target_stage_id': target_stage_id, # --- EDIT: Add ID to payload ---
         'triggered_by_email': triggered_by.get('email') if triggered_by else None
         # Note: We don't send the delay. The API will handle the logic.
     }
@@ -294,7 +297,7 @@ def handle_stage_move(candidate_slug, job_slug, delay_seconds, triggered_by):
         data = response.json()
 
         if data.get('success'):
-            log.info(f"✅ Candidate stage move triggered successfully: {data.get('message', '')}", extra={"json_fields": {**log_context, "success": True}})
+            logger.info(f"✅ Candidate stage move triggered successfully: {data.get('message', '')}", extra={"json_fields": {**log_context, "success": True}})
             return {'success': True, 'error': None, 'message': data.get('message', 'Stage move triggered')}
         else:
             error_msg = data.get('error', 'API returned success=false')

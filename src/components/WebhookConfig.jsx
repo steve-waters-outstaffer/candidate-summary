@@ -282,10 +282,10 @@ const WebhookConfig = () => {
                             label={
                                 <Box>
                                     <Typography variant="body1" fontWeight="medium">
-                                        Generate Without Interview Data
+                                        Allow Generation Without Interview Data
                                     </Typography>
                                     <Typography variant="body2" color="text.secondary">
-                                        Allow summary generation even when no Anna AI, Quil, or Fireflies interview data is available. Summary will be based on resume only.
+                                        Allow summary generation even when no Anna AI, Quil, or Fireflies interview data is available. Summary will be based on resume, job description and candidate data.
                                     </Typography>
                                 </Box>
                             }
@@ -308,7 +308,7 @@ const WebhookConfig = () => {
                             label={
                                 <Box>
                                     <Typography variant="body1" fontWeight="medium">
-                                        Create Tracking Note
+                                        Create Candidate Completion Note
                                     </Typography>
                                     <Typography variant="body2" color="text.secondary">
                                         Automatically create a note in RecruitCRM with the generated summary after generation completes
@@ -330,7 +330,7 @@ const WebhookConfig = () => {
                             label={
                                 <Box>
                                     <Typography variant="body1" fontWeight="medium">
-                                        Push Summary to Candidate Field
+                                        Push Summary to Candidate in RecruitCRM
                                     </Typography>
                                     <Typography variant="body2" color="text.secondary">
                                         Automatically push the generated summary to the candidate's "Summary" field in RecruitCRM
@@ -352,46 +352,25 @@ const WebhookConfig = () => {
                             label={
                                 <Box>
                                     <Typography variant="body1" fontWeight="medium">
-                                        Move to Next Stage (Legacy)
+                                        Move to Next Stage
                                     </Typography>
                                     <Typography variant="body2" color="text.secondary">
-                                        (Legacy) Automatically move the candidate to the next stage. Please use "Auto-Push" instead.
+                                        Automatically move the candidate to the next stage after summary generation.
                                     </Typography>
                                 </Box>
                             }
                         />
                     </Paper>
 
-                    <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
-                        <FormControlLabel
-                            control={
-                                <Switch
-                                    checked={config.auto_push}
-                                    onChange={(e) => handleChange('auto_push', e.target.checked)}
-                                />
-                            }
-                            label={
-                                <Box>
-                                    <Typography variant="body1" fontWeight="medium">
-                                        Auto-Push to Next Stage
-                                    </Typography>
-                                    <Typography variant="body2" color="text.secondary">
-                                        Automatically move the candidate to the next stage in the pipeline after summary is generated
-                                    </Typography>
-                                </Box>
-                            }
-                        />
-                    </Paper>
-
-                    {config.auto_push && (
+                    {config.move_to_next_stage && (
                         <TextField
                             fullWidth
                             type="number"
-                            label="Auto-Push Delay (seconds)"
+                            label="Move to next stage Delay (seconds)"
                             value={config.auto_push_delay_seconds}
                             onChange={(e) => handleChange('auto_push_delay_seconds', parseInt(e.target.value))}
                             sx={{ mb: 3 }}
-                            helperText="How many seconds to wait before automatically pushing the candidate to the next stage"
+                            helperText="How many seconds to wait before automatically moving the candidate to the next stage"
                         />
                     )}
 

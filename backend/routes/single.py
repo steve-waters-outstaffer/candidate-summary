@@ -507,15 +507,20 @@ def move_stage():
     candidate_slug = data.get('candidate_slug')
     job_slug = data.get('job_slug')
 
-    # This is the hard-coded target stage ID you specified
-    TARGET_STATUS_ID = 726195
+    # --- Read the new ID from the payload ---
+    new_id = data.get('target_stage_id')
+
+    if not new_id:
+        return jsonify({'success': False, 'error': 'target_stage_id is missing'}), 400
 
     if not candidate_slug or not job_slug:
         return jsonify({'error': 'Missing candidate_slug or job_slug'}), 400
 
     try:
+        # --- EDIT THIS LINE ---
         # Call the new helper with slugs and the target ID
-        move_result = set_candidate_stage_by_slug(candidate_slug, job_slug, TARGET_STATUS_ID)
+        move_result = set_candidate_stage_by_slug(candidate_slug, job_slug, new_id)
+        # --- END OF EDIT ---
 
         if move_result:
             new_stage_label = move_result.get('status', {}).get('label', 'Unknown')
@@ -530,7 +535,6 @@ def move_stage():
     except Exception as e:
         log.error("single.move_stage.exception", error=str(e), exc_info=True)
         return jsonify({'error': str(e)}), 500
-# --- END OF NEW ROUTE ---
 
 
 @single_bp.route('/create-gmail-draft', methods=['POST'])
