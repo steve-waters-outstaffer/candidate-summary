@@ -7,6 +7,8 @@ import time
 from config import db, FALLBACK_CONFIG, WORKER_VERSION
 from logging_helpers import logger, log_to_firestore
 import api_client  # Import the entire module
+import datetime
+
 
 
 def get_dynamic_config():
@@ -287,9 +289,12 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
             sources = [k.replace('_', ' ').title() for k, v in run_data['sources_used'].items() if v]
             trigger_email = (updated_by.get('email', 'Unknown') if updated_by else 'System')
 
-            # Changed from HTML to plain text with newlines
+            # Get current time and format it (using UTC for standardization)
+            now_utc = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+            # Changed from HTML to plain text with newlines and timestamp
             note_text = (
-                "🤖 AI Summary Run - Report\n"
+                f"🤖 AI Summary Run - Report ({now_utc})\n"  # <-- Added timestamp
                 f"Status: Success\n"
                 f"Candidate: {run_data.get('candidate_name', 'N/A')}\n"
                 f"Job: {run_data.get('job_name', 'N/A')}\n"

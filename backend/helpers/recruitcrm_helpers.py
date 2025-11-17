@@ -2,6 +2,7 @@
 import os
 import requests
 import structlog
+import datetime
 
 log = structlog.get_logger()
 
@@ -203,7 +204,8 @@ def create_recruitcrm_note(candidate_slug, job_slug, note_content):
     payload = {
         "description": note_content,       # <-- This will be the plain text from orchestrator.py
         "related_to": candidate_slug,
-        "related_to_type": "candidate"
+        "related_to_type": "candidate",
+        "associated_jobs": [job_slug]
         # We are intentionally omitting associated_jobs, note_type_id, etc.,
         # as they are not in your minimal test and may be causing the 422 error.
     }
@@ -233,10 +235,13 @@ def set_candidate_stage_by_slug(candidate_slug, job_slug, new_status_id):
     # This URL is from your Postman test
     url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}/hiring-stages/{job_slug}"
 
+    now_utc = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    remark_text = f"Candidate summary tool automation at {now_utc}"
+
     # This payload is based on your test. We'll set 'updated_by' to 0 for 'system'.
     payload = {
         "status_id": new_status_id,
-        "updated_by": 0
+        "remark": remark_text
     }
 
     try:
