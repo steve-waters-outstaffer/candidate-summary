@@ -6,6 +6,7 @@ import sys
 import structlog
 from flask import Flask, jsonify, request
 import uuid
+import analytics
 
 # Add the project's root directory to the Python path
 # This MUST be at the top, before other local imports
@@ -86,7 +87,7 @@ def before_request():
 
 # --- Environment Variable Checks ---
 # (These are used by helpers, but good to check at startup)
-required_keys = ['RECRUITCRM_API_KEY', 'ALPHARUN_API_KEY', 'GOOGLE_API_KEY', 'FIREFLIES_API_KEY']
+required_keys = ['RECRUITCRM_API_KEY', 'ALPHARUN_API_KEY', 'GOOGLE_API_KEY', 'FIREFLIES_API_KEY', 'SEGMENT_WRITE_KEY']
 for key in required_keys:
     if not os.getenv(key):
         log.error("environment_variable_not_set", variable=key)
@@ -112,6 +113,23 @@ except Exception as e:
     log.error("firestore_client.initialization_failed", error=str(e))
     app.db = None
 
+# --- NEW: Configure Segment ---
+try:
+    SEGMENT_WRITE_KEY = os.getenv('SEGMENT_WRITE_KEY')
+    if SEGMENT_WRITE_KEY:
+        # 2. Set the write key for the library
+        analytics.write_key = SEGMENT_WRITE_KEY
+
+        # 3. Add an error handler (good practice)
+        def on_segment_error(e, msg):
+            log.error("segment_client.error", error=str(e), message=msg)
+        analytics.on_error = on_segment_error
+
+        log.info("segment_client.initialized")
+    else:
+        log.warning("segment_client.initialization_skipped", reason="SEGMENT_WRITE_KEY not set")
+except Exception as e:
+    log.error("segment_client.initialization_failed", error=str(e))
 
 # ==============================================================================
 # 2. BLUEPRINT REGISTRATION

@@ -5,6 +5,9 @@ import re
 from flask import Blueprint, request, jsonify, current_app
 import structlog
 import requests
+import analytics
+
+var = -python
 
 # --- Start Debugging Imports ---
 log = structlog.get_logger()
@@ -608,3 +611,40 @@ def log_feedback():
     except Exception as e:
         log.error("single.log_feedback.error", error=str(e))
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+
+
+# --- ADD THIS NEW ROUTE ---
+@single_bp.route('/track-event', methods=['POST'])
+def track_event():
+    """
+    Receives an event from the worker and tracks it using the
+    official Segment analytics-python library.
+    """
+    log.info("single.track_event.hit")
+    data = request.get_json()
+
+    user_id = data.get('userId')
+    event_name = data.get('event')
+    properties = data.get('properties')
+    context = data.get('context') # Optional context
+
+    if not all([user_id, event_name]):
+        log.error("single.track_event.missing_data", data=data)
+        return jsonify({'error': 'Missing userId or event name'}), 400
+
+    try:
+        # Use the official library to track the event
+        analytics.track(
+            user_id=user_id,
+            event=event_name,
+            properties=properties,
+            context=context
+        )
+
+        log.info("single.track_event.success", event=event_name, user_id=user_id)
+        return jsonify({'success': True, 'message': 'Event tracked successfully'})
+
+    except Exception as e:
+        log.error("single.track_event.exception", error=str(e), exc_info=True)
+        return jsonify({'error': str(e)}), 500
+# --- END OF NEW ROUTE ---
