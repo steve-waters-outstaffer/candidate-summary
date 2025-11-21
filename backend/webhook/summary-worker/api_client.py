@@ -312,3 +312,52 @@ def handle_stage_move(candidate_slug, job_slug, target_stage_id, delay_seconds, 
         error_msg = f"Unexpected error in stage move: {e}"
         logger.error(error_msg, extra={"json_fields": {**log_context, "error": str(e), "success": False}})
         return {'success': False, 'error': str(e), 'message': 'Failed to trigger stage move'}
+
+
+def handle_segment_track(segment_payload, triggered_by):
+    """Sends a tracking event to Segment via the backend API."""
+    log_context = {
+        "action": "segment_track",
+        "event": segment_payload.get('event'),
+        "user_id": segment_payload.get('userId')
+    }
+
+    url = f"{FLASK_APP_URL}/api/track-event"
+    
+    logger.info("🔵 Starting Segment track call...", 
+                extra={"json_fields": {**log_context, "url": url, "payload": segment_payload}})
+
+    try:
+        logger.info("📤 Sending POST request to backend...", extra={"json_fields": log_context})
+        
+        response = requests.post(url, json=segment_payload, timeout=REQUEST_TIMEOUT)
+        
+        logger.info("📥 Received response from backend", 
+                    extra={"json_fields": {**log_context, "status_code": response.status_code}})
+        
+        response.raise_for_status()
+        data = response.json()
+        
+        logger.info("📋 Backend response data", 
+                    extra={"json_fields": {**log_context, "response_data": data}})
+
+        if data.get('success'):
+            logger.info("✅ Segment event tracked successfully.", extra={"json_fields": {**log_context, "success": True}})
+            return {'success': True, 'error': None, 'message': 'Event tracked successfully'}
+        else:
+            error_msg = data.get('error', 'API returned success=false')
+            logger.error(f"❌ Failed to track Segment event: {error_msg}", extra={"json_fields": {**log_context, "error": error_msg, "success": False}})
+            return {'success': False, 'error': error_msg, 'message': 'Failed to track event'}
+
+    except requests.exceptions.Timeout:
+        error_msg = f"⏱️ Request timeout after {REQUEST_TIMEOUT}s"
+        logger.error(error_msg, extra={"json_fields": {**log_context, "error": error_msg, "success": False}})
+        return {'success': False, 'error': error_msg, 'message': 'Request timeout'}
+    except requests.exceptions.RequestException as e:
+        error_msg = f"🔴 Request failed: {e}"
+        logger.error(error_msg, extra={"json_fields": {**log_context, "error": str(e), "status_code": getattr(e.response, 'status_code', None), "success": False}})
+        return {'success': False, 'error': str(e), 'message': 'Failed to track event'}
+    except Exception as e:
+        error_msg = f"💥 Unexpected error in Segment tracking: {e}"
+        logger.error(error_msg, extra={"json_fields": {**log_context, "error": str(e), "success": False}})
+        return {'success': False, 'error': str(e), 'message': 'Failed to track event'}

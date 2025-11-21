@@ -333,49 +333,48 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
             logger.info("Skipping stage move (disabled in config).", extra={"json_fields": base_log_context})
 
         # Action 4: Send Segment Event
-        # We check for the *key* in the config, not the URL anymore
-        if dynamic_config.get('notification_webhook_url'): # We can re-use this config flag
+        logger.info("📦 Preparing Segment tracking event...", extra={"json_fields": base_log_context})
+        
+        # Log to Firestore first to get the ID
+        if 'firestore_id' not in run_data:
+            firestore_id = log_to_firestore(run_data)
+            run_data['firestore_id'] = firestore_id
+            logger.info("📝 Logged to Firestore for Segment event", 
+                       extra={"json_fields": {**base_log_context, "firestore_id": firestore_id}})
 
-            # Log to Firestore first to get the ID
-            if 'firestore_id' not in run_data:
-                firestore_id = log_to_firestore(run_data)
-                run_data['firestore_id'] = firestore_id
-
-            # Build the Segment event payload
-            segment_payload = {
-                "userId": trigger_email,
-                "event": "AI Summary Generated",
-                "properties": {
-                    "success": True,
-                    "candidate_name": run_data.get('candidate_name', 'N/A'),
-                    "job_name": run_data.get('job_name', 'N/A'),
-                    "candidate_slug": candidate_slug,
-                    "job_slug": job_slug,
-                    "prompt_id": run_data.get('prompt_id', 'unknown'),
-                    "sources_used": [k for k, v in run_data['sources_used'].items() if v],
-                    "run_id": run_data.get('firestore_id', 'N/A')
-                },
-                "context": {
-                    "source": "ai-summary-worker",
-                    "worker_version": WORKER_VERSION
-                }
+        # Build the Segment event payload
+        segment_payload = {
+            "userId": trigger_email,
+            "event": "AI Summary Generated",
+            "properties": {
+                "success": True,
+                "candidate_name": run_data.get('candidate_name', 'N/A'),
+                "job_name": run_data.get('job_name', 'N/A'),
+                "candidate_slug": candidate_slug,
+                "job_slug": job_slug,
+                "prompt_id": run_data.get('prompt_id', 'unknown'),
+                "sources_used": [k for k, v in run_data['sources_used'].items() if v],
+                "run_id": run_data.get('firestore_id', 'N/A')
+            },
+            "context": {
+                "source": "ai-summary-worker",
+                "worker_version": WORKER_VERSION
             }
+        }
 
-            logger.info("Sending Segment track event.", extra={"json_fields": base_log_context})
+        logger.info("📦 Built Segment payload", 
+                   extra={"json_fields": {**base_log_context, "segment_payload": segment_payload}})
 
-            # Call the new api_client function
-            notification_result = api_client.handle_segment_track(
-                segment_payload,
-                updated_by
-            )
-            run_data['post_actions']['segment_track'] = notification_result
-        else:
-            logger.info("Skipping Segment tracking (notification_webhook_url not set).", extra={"json_fields": base_log_context})
-            # We still need to log to firestore if we skipped the notification
-            if 'firestore_id' not in run_data:
-                firestore_id = log_to_firestore(run_data)
-                run_data['firestore_id'] = firestore_id
-        # --- END OF NEW ACTION ---
+        # Call the api_client function
+        logger.info("🚀 Calling handle_segment_track...", extra={"json_fields": base_log_context})
+        notification_result = api_client.handle_segment_track(
+            segment_payload,
+            updated_by
+        )
+        logger.info("📨 Segment track call completed", 
+                   extra={"json_fields": {**base_log_context, "result": notification_result}})
+        run_data['post_actions']['segment_track'] = notification_result
+        # --- END OF SEGMENT TRACKING ---
 
     else:
         logger.error(

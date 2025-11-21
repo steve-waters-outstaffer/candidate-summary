@@ -26,25 +26,35 @@ except ImportError:
 
 
 # --- GCP Compliant Structured Logging Setup ---
-try:
-    # Check if the import was successful
-    if 'google.cloud' in sys.modules and hasattr(google, 'cloud') and hasattr(google.cloud, 'logging'):
-        client = google.cloud.logging.Client()
-        handler = client.get_default_handler()
-        root_logger = logging.getLogger()
-        root_logger.handlers.clear()  # Remove existing handlers
-        root_logger.addHandler(handler)
-        root_logger.setLevel(logging.INFO)
-        logger = logging.getLogger(__name__)
-        logger.info("Structured logging initialized successfully.")
-    else:
-        raise Exception("google.cloud.logging module not available.")
-except Exception as e:
-    # Fallback to basic logging if GCP logging fails
+# Check if we're running locally (set LOCAL_DEV=true to disable Cloud Logging)
+USE_LOCAL_LOGGING = os.getenv('LOCAL_DEV', 'false').lower() == 'true'
+
+if USE_LOCAL_LOGGING:
+    # Use basic console logging for local development
     logging.basicConfig(stream=sys.stdout, level=logging.INFO,
-                        format='%(levelname)s: %(message)s')
+                        format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
-    logger.error(f"Failed to initialize GCP structured logging: {e}. Falling back to basicConfig.")
+    logger.info("Running in local mode - using console logging.")
+else:
+    try:
+        # Check if the import was successful
+        if 'google.cloud' in sys.modules and hasattr(google, 'cloud') and hasattr(google.cloud, 'logging'):
+            client = google.cloud.logging.Client()
+            handler = client.get_default_handler()
+            root_logger = logging.getLogger()
+            root_logger.handlers.clear()  # Remove existing handlers
+            root_logger.addHandler(handler)
+            root_logger.setLevel(logging.INFO)
+            logger = logging.getLogger(__name__)
+            logger.info("Structured logging initialized successfully.")
+        else:
+            raise Exception("google.cloud.logging module not available.")
+    except Exception as e:
+        # Fallback to basic logging if GCP logging fails
+        logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                            format='%(levelname)s: %(message)s')
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to initialize GCP structured logging: {e}. Falling back to basicConfig.")
 # --- End of Logging Setup ---
 
 

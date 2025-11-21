@@ -200,14 +200,13 @@ def create_recruitcrm_note(candidate_slug, job_slug, note_content):
     url = "https://api.recruitcrm.io/v1/notes"
 
     # --- UPDATED MINIMAL PAYLOAD ---
-    # Using only the fields from your test
+    # Using required fields from RecruitCRM API
     payload = {
+        "note_type_id": 196804,            # Required field - your note type ID
         "description": note_content,       # <-- This will be the plain text from orchestrator.py
         "related_to": candidate_slug,
         "related_to_type": "candidate",
-        "associated_jobs": [job_slug]
-        # We are intentionally omitting associated_jobs, note_type_id, etc.,
-        # as they are not in your minimal test and may be causing the 422 error.
+        "associated_jobs": job_slug        # String, not array
     }
     # --- END OF UPDATED PAYLOAD ---
 

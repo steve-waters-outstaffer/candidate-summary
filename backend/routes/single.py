@@ -7,8 +7,6 @@ import structlog
 import requests
 import analytics
 
-var = -python
-
 # --- Start Debugging Imports ---
 log = structlog.get_logger()
 log.info("routes.single: Top of file, starting imports.")
@@ -622,6 +620,8 @@ def track_event():
     """
     log.info("single.track_event.hit")
     data = request.get_json()
+    
+    log.info("single.track_event.received_payload", payload=data)
 
     user_id = data.get('userId')
     event_name = data.get('event')
@@ -633,6 +633,11 @@ def track_event():
         return jsonify({'error': 'Missing userId or event name'}), 400
 
     try:
+        log.info("single.track_event.calling_segment", 
+                 event_name=event_name, 
+                 user_id=user_id,
+                 properties=properties)
+        
         # Use the official library to track the event
         analytics.track(
             user_id=user_id,
@@ -641,10 +646,16 @@ def track_event():
             context=context
         )
 
-        log.info("single.track_event.success", event=event_name, user_id=user_id)
+        log.info("single.track_event.segment_called_success", 
+                 event_name=event_name, 
+                 user_id=user_id)
         return jsonify({'success': True, 'message': 'Event tracked successfully'})
 
     except Exception as e:
-        log.error("single.track_event.exception", error=str(e), exc_info=True)
+        log.error("single.track_event.exception", 
+                  error=str(e), 
+                  event_name=event_name,
+                  user_id=user_id,
+                  exc_info=True)
         return jsonify({'error': str(e)}), 500
 # --- END OF NEW ROUTE ---
