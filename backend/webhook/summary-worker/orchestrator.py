@@ -57,7 +57,11 @@ def get_dynamic_config():
                 'auto_push_delay_seconds': config_data.get('auto_push_delay_seconds', FALLBACK_CONFIG['auto_push_delay_seconds']),
 
                 # --- EDIT: Add the new target_stage_id config value ---
-                'target_stage_id': target_stage_id
+                'target_stage_id': target_stage_id,
+
+                # Gemini model names - overridable from Firestore UI
+                'gemini_summary_model': config_data.get('gemini_summary_model', FALLBACK_CONFIG['gemini_summary_model']),
+                'gemini_matching_model': config_data.get('gemini_matching_model', FALLBACK_CONFIG['gemini_matching_model']),
             }
         else:
             logger.warning(
@@ -281,13 +285,15 @@ def process_summary_task(candidate_slug, job_slug, task_metadata, updated_by=Non
         else:
             logger.info("Skipping summary push (disabled in config).", extra={"json_fields": base_log_context})
 
+        # Define trigger_email early so it's available for all post-actions
+        trigger_email = (updated_by.get('email', 'Unknown') if updated_by else 'System')
+
         # Action 2: Create Note (using new flag and new stub)
         if dynamic_config.get('create_tracking_note'):
 
             # --- FIX: Build the note as PLAIN TEXT ---
             # Get a list of sources that were successfully tested and used
             sources = [k.replace('_', ' ').title() for k, v in run_data['sources_used'].items() if v]
-            trigger_email = (updated_by.get('email', 'Unknown') if updated_by else 'System')
 
             # Get current time and format it (using UTC for standardization)
             now_utc = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")

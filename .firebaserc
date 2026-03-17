@@ -1,5 +1,27 @@
 {
   "projects": {
-    "default": "candidate-summary-ai"
-  }
+    "default": "candidate-summary-ai",
+    "uat": "candidate-summary-ai-uat",
+    "prod": "candidate-summary-ai"
+  },
+  "targets": {
+    "candidate-summary-ai": {
+      "hosting": {
+        "uat": [
+          "candidate-summary-ai-uat"
+        ],
+        "prod": [
+          "candidate-summary-ai"
+        ]
+      }
+    },
+    "candidate-summary-ai-uat": {
+      "hosting": {
+        "uat": [
+          "candidate-summary-ai-uat"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

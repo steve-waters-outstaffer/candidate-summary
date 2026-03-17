@@ -105,6 +105,12 @@ def generate_summary(candidate_slug, job_slug, config):
         **config
     }
 
+    # Pass model names explicitly so the Flask API can route to the right model
+    if 'gemini_summary_model' in config:
+        payload['gemini_summary_model'] = config['gemini_summary_model']
+    if 'gemini_matching_model' in config:
+        payload['gemini_matching_model'] = config['gemini_matching_model']
+
     try:
         logger.info(
             "Generating summary",

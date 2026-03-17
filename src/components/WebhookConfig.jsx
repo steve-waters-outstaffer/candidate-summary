@@ -39,7 +39,9 @@ const WebhookConfig = () => {
         max_concurrent_tasks: 5,
         rate_limit_per_minute: 10,
         push_summary_to_candidate: false, // <-- ADDED
-        move_to_next_stage: false         // <-- ADDED
+        move_to_next_stage: false,         // <-- ADDED
+        gemini_summary_model: 'gemini-3.1-pro-preview',
+        gemini_matching_model: 'gemini-3-flash-preview'
     });
 
     // Available prompts from database
@@ -240,10 +242,10 @@ const WebhookConfig = () => {
                             label={
                                 <Box>
                                     <Typography variant="body1" fontWeight="medium">
-                                        Use Quil Interview Notes
+                                        Use CoRecruit Interview Notes
                                     </Typography>
                                     <Typography variant="body2" color="text.secondary">
-                                        Include Quil interview transcripts when generating summaries
+                                        Include CoRecruit interview transcripts when generating summaries
                                     </Typography>
                                 </Box>
                             }
@@ -285,7 +287,7 @@ const WebhookConfig = () => {
                                         Allow Generation Without Interview Data
                                     </Typography>
                                     <Typography variant="body2" color="text.secondary">
-                                        Allow summary generation even when no Anna AI, Quil, or Fireflies interview data is available. Summary will be based on resume, job description and candidate data.
+                                        Allow summary generation even when no Anna AI, CoRecruit, or Fireflies interview data is available. Summary will be based on resume, job description and candidate data.
                                     </Typography>
                                 </Box>
                             }
@@ -397,6 +399,32 @@ const WebhookConfig = () => {
                         onChange={(e) => handleChange('rate_limit_per_minute', parseInt(e.target.value))}
                         sx={{ mb: 3 }}
                         helperText="Maximum number of webhook requests that can be processed per minute"
+                    />
+
+                    <Divider sx={{ my: 3 }} />
+
+                    {/* AI Model Configuration */}
+                    <Typography variant="h6" gutterBottom>AI Model Configuration</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Change model names here to switch versions without redeploying. Must be valid Gemini API model strings.
+                    </Typography>
+
+                    <TextField
+                        fullWidth
+                        label="Summary Generation Model"
+                        value={config.gemini_summary_model}
+                        onChange={(e) => handleChange('gemini_summary_model', e.target.value)}
+                        sx={{ mb: 3 }}
+                        helperText="Used for generating candidate summaries. Higher quality, higher cost (e.g. gemini-3.1-pro-preview)"
+                    />
+
+                    <TextField
+                        fullWidth
+                        label="Note Matching Model"
+                        value={config.gemini_matching_model}
+                        onChange={(e) => handleChange('gemini_matching_model', e.target.value)}
+                        sx={{ mb: 3 }}
+                        helperText="Used for CoRecruit note matching and bulk email generation. Faster, lower cost (e.g. gemini-3-flash-preview)"
                     />
                 </CardContent>
             </Card>

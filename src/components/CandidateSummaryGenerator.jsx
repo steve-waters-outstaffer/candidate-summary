@@ -207,7 +207,7 @@ const CandidateSummaryGenerator = () => {
         
         if (!API_BASE_URL) return;
         
-        setApiStatus(prev => ({ ...prev, quil: { status: 'loading', message: 'Searching for Quil notes...', data: null } }));
+        setApiStatus(prev => ({ ...prev, quil: { status: 'loading', message: 'Searching for CoRecruit notes...', data: null } }));
         
         try {
             const response = await fetch(`${API_BASE_URL}/api/test-quil`, {
@@ -230,17 +230,17 @@ const CandidateSummaryGenerator = () => {
                         data: data 
                     } 
                 }));
-                showAlert('success', 'Quil interview note found and matched!');
+                showAlert('success', 'CoRecruit interview note found and matched!');
             } else {
                 setApiStatus(prev => ({ 
                     ...prev, 
                     quil: { 
                         status: 'error', 
-                        message: data.error || 'No Quil notes found', 
+                        message: data.error || 'No CoRecruit notes found', 
                         data: null 
                     } 
                 }));
-                showAlert('error', data.error || 'No Quil interview notes found for this candidate/job');
+                showAlert('error', data.error || 'No CoRecruit interview notes found for this candidate/job');
             }
         } catch (error) {
             setApiStatus(prev => ({ 
@@ -601,7 +601,7 @@ const CandidateSummaryGenerator = () => {
                             
                             <FormControlLabel 
                                 control={<Switch checked={useQuil} onChange={(e) => setUseQuil(e.target.checked)} name="useQuil" />} 
-                                label="Use Quil Interview Notes" 
+                                label="Use CoRecruit Interview Notes" 
                                 sx={{ mb: Spacing.Small }} 
                             />
                             <Collapse in={useQuil}>
@@ -612,11 +612,11 @@ const CandidateSummaryGenerator = () => {
                                         onClick={handleQuilTest} 
                                         disabled={!formData.candidate_slug || !formData.job_slug}
                                     >
-                                        Test Quil Notes
+                                        Test CoRecruit Notes
                                     </Button>
                                 </Box>
                                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, border: '1px solid #eee', borderRadius: 1, mb: Spacing.Medium }}>
-                                    <Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Quil Interview:</Typography>
+                                    <Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>CoRecruit Interview:</Typography>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                         {getStatusIcon(apiStatus.quil.status)}
                                         <Typography variant="body2" sx={{ color: getStatusColor(apiStatus.quil.status) }}>

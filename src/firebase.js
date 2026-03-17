@@ -5,17 +5,22 @@ import { getFirestore } from "firebase/firestore";
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// Environment-aware configuration
+// These are injected at build time via Vite
 const firebaseConfig = {
-    apiKey: "AIzaSyDmlUccTk6LkBOWkc52G8_Cit1E90orCm8",
-    authDomain: "candidate-summary-ai.firebaseapp.com",
-    projectId: "candidate-summary-ai",
-    storageBucket: "candidate-summary-ai.firebasestorage.app",
-    messagingSenderId: "14026519729",
-    appId: "1:14026519729:web:c29812bac9678a695ade90",
-    measurementId: "G-PV7CQCD0BX"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
+
+// Backend API URL (injected at build time)
+export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+export const ENVIRONMENT = import.meta.env.VITE_ENVIRONMENT || 'production';
+export const SEGMENT_WRITE_KEY = import.meta.env.VITE_SEGMENT_WRITE_KEY;
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);

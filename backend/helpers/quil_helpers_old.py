@@ -87,7 +87,7 @@ Return your analysis.
 """
             
             response = client.models.generate_content(
-                model='gemini-2.0-flash-exp',
+                model='gemini-3-flash-preview',
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -234,7 +234,7 @@ Return your analysis with the note ID that best matches this job.
 """
         
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model='gemini-3-flash-preview',
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 response_mime_type="application/json",

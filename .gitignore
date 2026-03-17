@@ -23,6 +23,14 @@ backend/env/
 *.pyo
 *.pyd
 
+# Config files with secrets
+config/*.env
+config/prod.env
+config/uat.env
+
+# Keep templates
+!config/*.env.template
+
 # misc
 .DS_Store
 .env

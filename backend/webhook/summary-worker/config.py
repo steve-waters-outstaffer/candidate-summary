@@ -34,5 +34,9 @@ FALLBACK_CONFIG = {
     'auto_push_delay_seconds': 0, # We can rename this to move_stage_delay_seconds if you like
 
     # Default target stage in case Firestore is missing the value
-    'target_stage_id': 726195
+    'target_stage_id': 726195,
+
+    # Gemini model names - can be overridden via Firestore without redeployment
+    'gemini_summary_model': 'gemini-3.1-pro-preview',
+    'gemini_matching_model': 'gemini-3-flash-preview'
 }

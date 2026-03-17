@@ -30,8 +30,9 @@ app = Flask(__name__)
 # --- CORS configuration ---
 CORS(app,
      origins=[
-         "https://candidate-summary-ai.web.app",  # Deployed frontend
-         "http://localhost:5173",                 # Local development (Vite)
+         "https://candidate-summary-ai.web.app",      # PROD frontend
+         "https://candidate-summary-ai-uat.web.app",  # UAT frontend
+         "http://localhost:5173",                     # Local development (Vite)
          "http://localhost:3000",
          "http://localhost:5174"
          # Local development (Create React App)

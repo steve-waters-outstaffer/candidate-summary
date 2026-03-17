@@ -138,7 +138,7 @@ def generate_multiple_candidates():
             prompt_contents.extend(resume_files)
 
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-3-flash-preview',
             contents=prompt_contents
         )
         cleaned_content = re.sub(r'^```html\n|```$', '', response.text, flags=re.MULTILINE)
@@ -213,7 +213,17 @@ def process_curated_candidates():
                         if interview_id:
                             interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
 
-                    summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, client)
+                    summary = generate_html_summary(
+                        candidate_data=full_candidate_data,
+                        job_data=job_data,
+                        interview_data=interview_data,
+                        additional_context="",
+                        prompt_type=single_prompt,
+                        fireflies_data=None,
+                        quil_data=None,
+                        gemini_resume_file=gemini_resume_file,
+                        client=client
+                    )
 
                     if summary:
                         processed_summaries_list.append({'name': name, 'slug': slug, 'html': summary})
@@ -237,7 +247,7 @@ def process_curated_candidates():
                 }
                 full_prompt = build_full_prompt(multi_prompt, "multiple", **prompt_kwargs)
                 response = client.models.generate_content(
-                    model='gemini-2.0-flash',
+                    model='gemini-3-flash-preview',
                     contents=[full_prompt]
                 )
                 if response and response.text:

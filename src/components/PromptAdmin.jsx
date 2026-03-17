@@ -412,7 +412,7 @@ const PromptAdmin = () => {
                             Interview Data
                         </Typography>
                         <Box sx={{ fontSize: '0.875rem', '& code': { bgcolor: 'grey.200', px: 0.5, py: 0.25, borderRadius: 0.5 } }}>
-                            <div><code>{'{{quil_interview}}'}</code> - Quil summary</div>
+                            <div><code>{'{{quil_interview}}'}</code> - CoRecruit summary</div>
                             <div><code>{'{{ai_interview}}'}</code> - AlphaRun interview</div>
                             <div><code>{'{{fireflies_transcript}}'}</code> - Call transcript</div>
                         </Box>

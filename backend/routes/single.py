@@ -219,14 +219,14 @@ def test_quil():
         if not candidate_notes:
             return jsonify({'error': 'No notes found for candidate'}), 404
         
-        # Count Quil notes
-        quil_notes = [n for n in candidate_notes if n.get('description', '').startswith('Quil ')]
+        # Count CoRecruit notes
+        quil_notes = [n for n in candidate_notes if n.get('description', '').startswith('CoRecruit ')]
         log.info("single.test_quil.filtered_quil_notes",
                  quil_count=len(quil_notes),
                  quil_type=type(quil_notes).__name__)
         
         if not quil_notes:
-            return jsonify({'error': 'No Quil interview notes found for this candidate'}), 404
+            return jsonify({'error': 'No CoRecruit interview notes found for this candidate'}), 404
         
         # Fetch job details for matching
         job_data = fetch_recruitcrm_job(job_slug)
@@ -304,6 +304,10 @@ def generate_summary():
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
         client = current_app.client
 
+        # Model name can be overridden via config (Firestore-driven, no redeploy needed)
+        gemini_summary_model = data.get('gemini_summary_model', 'gemini-3.1-pro-preview')
+        gemini_matching_model = data.get('gemini_matching_model', 'gemini-3-flash-preview')
+
         if not all([candidate_slug, job_slug]):
             return jsonify({'error': 'Missing required RecruitCRM fields'}), 400
 
@@ -364,7 +368,8 @@ def generate_summary():
                     candidate_notes,
                     job_slug,
                     job_title,
-                    job_description
+                    job_description,
+                    model=gemini_matching_model
                 )
                 
                 if quil_data:
@@ -410,7 +415,18 @@ def generate_summary():
                 quil_summary_present=True
             )
 
-        html_summary = generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, quil_data, gemini_resume_file, client)
+        html_summary = generate_html_summary(
+            candidate_data=candidate_data,
+            job_data=job_data,
+            interview_data=interview_data,
+            additional_context=additional_context,
+            prompt_type=prompt_type,
+            fireflies_data=fireflies_data,
+            quil_data=quil_data,
+            gemini_resume_file=gemini_resume_file,
+            client=client,
+            model=gemini_summary_model
+        )
 
         if html_summary:
             return jsonify({

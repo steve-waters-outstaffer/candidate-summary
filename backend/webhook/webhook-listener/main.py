@@ -43,6 +43,7 @@ GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
 CLOUD_TASKS_QUEUE = os.environ.get('CLOUD_TASKS_QUEUE', 'candidate-summary-queue')
 CLOUD_TASKS_LOCATION = os.environ.get('CLOUD_TASKS_LOCATION', 'us-central1')
 WORKER_FUNCTION_URL = os.environ.get('WORKER_FUNCTION_URL')
+LISTENER_ENVIRONMENT = os.environ.get('ENVIRONMENT', 'production')  # 'uat' or 'production'
 
 # --- Target Status ID for Filtering ---
 # This is the ID for "2.0.1. AI Summary - For Generation"
@@ -66,8 +67,17 @@ def create_summary_task(candidate_slug, job_slug, payload):
             'webhook_payload': payload  # Pass full payload for reference
         }
 
+        # Generate a unique task name for deduplication
+        # Format: candidate-{slug}-job-{slug}-{time_window}
+        # Use 5-minute time windows to prevent duplicate processing
+        import time
+        time_window = int(time.time() / 300)  # 5-minute windows (300 seconds)
+        task_id = f"candidate-{candidate_slug}-job-{job_slug}-{time_window}"
+        task_name = tasks_client.task_path(GCP_PROJECT_ID, CLOUD_TASKS_LOCATION, CLOUD_TASKS_QUEUE, task_id)
+
         # Create the task
         task = {
+            'name': task_name,  # Named tasks for deduplication
             'http_request': {
                 'http_method': tasks_v2.HttpMethod.POST,
                 'url': WORKER_FUNCTION_URL,
@@ -191,12 +201,71 @@ def webhook_listener(request):
                 "filter_matched": True,
                 "current_stage_id": current_status_id,
                 "target_stage_id": TARGET_STATUS_ID,
+                "action": "proceeding_to_environment_check"
+            }
+        })
+        # --- STAGE FILTER LOGIC ENDS ---
+
+        # --- ENVIRONMENT FILTER ---
+        # Extract job custom fields
+        job_data = payload.get('job', {})
+        job_custom_fields = job_data.get('custom_fields', [])
+        
+        # Find the "Candidate Summary [UAT]" field
+        is_uat_job = False
+        uat_field_value = None
+        for field in job_custom_fields:
+            if isinstance(field, dict):
+                field_name = field.get('field_name', '')
+                if field_name == 'Candidate Summary [UAT]':
+                    uat_field_value = field.get('value', '').strip() if field.get('value') else None
+                    is_uat_job = (uat_field_value == 'Yes')
+                    break
+        
+        # Determine expected environment based on field value
+        # Default to 'production' if field is null, blank, or 'No'
+        job_environment = 'uat' if is_uat_job else 'production'
+        
+        logger.info("Environment filter check", extra={
+            "json_fields": {
+                "event": "environment_filter_check",
+                "job_environment": job_environment,
+                "listener_environment": LISTENER_ENVIRONMENT,
+                "uat_field_value": uat_field_value,
+                "job_slug": payload.get('job_slug')
+            }
+        })
+        
+        # Check if job environment matches listener environment
+        if job_environment != LISTENER_ENVIRONMENT.lower():
+            logger.info("Environment filter result: skipped", extra={
+                "json_fields": {
+                    "event": "environment_filter_result",
+                    "filter_matched": False,
+                    "job_environment": job_environment,
+                    "listener_environment": LISTENER_ENVIRONMENT,
+                    "uat_field_value": uat_field_value,
+                    "action": "skipped"
+                }
+            })
+            return jsonify({
+                "status": "skipped",
+                "message": f"Job environment '{job_environment}' does not match listener environment '{LISTENER_ENVIRONMENT}'"
+            }), 200
+        
+        logger.info("Environment filter result: proceeding", extra={
+            "json_fields": {
+                "event": "environment_filter_result",
+                "filter_matched": True,
+                "job_environment": job_environment,
+                "listener_environment": LISTENER_ENVIRONMENT,
+                "uat_field_value": uat_field_value,
                 "action": "proceeding_to_queue"
             }
         })
-        # --- FILTER LOGIC ENDS ---
+        # --- ENVIRONMENT FILTER LOGIC ENDS ---
 
-        # Extract slugs now that filter has passed
+        # Extract slugs now that all filters have passed
         candidate_slug = payload.get('candidate_slug')
         job_slug = payload.get('job_slug')
 

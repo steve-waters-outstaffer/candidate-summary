@@ -105,14 +105,15 @@ def _process_recruitcrm_payload(app, payload: Dict[str, Any]) -> None:
             additional_context = data.get("additional_context", "")
 
             html_summary = generate_html_summary(
-                candidate_data,
-                job_data,
-                interview_data,
-                additional_context,
-                prompt_type,
-                None,
-                gemini_resume_file,
-                client,
+                candidate_data=candidate_data,
+                job_data=job_data,
+                interview_data=interview_data,
+                additional_context=additional_context,
+                prompt_type=prompt_type,
+                fireflies_data=None,
+                quil_data=None,
+                gemini_resume_file=gemini_resume_file,
+                client=client
             )
 
             if not html_summary:

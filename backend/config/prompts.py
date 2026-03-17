@@ -157,7 +157,7 @@ def build_full_prompt(prompt_type, prompt_category="single", **kwargs):
 
     if quil_data and quil_data.get('summary_html'):
         interview_parts.append(
-            "\n**RECRUITER-LED INTERVIEW (from Quil):**\n"
+            "\n**RECRUITER-LED INTERVIEW (from CoRecruit):**\n"
             f"Link: {quil_data.get('quil_link', 'N/A')}\n"
             f"{quil_data['summary_html']}"
         )

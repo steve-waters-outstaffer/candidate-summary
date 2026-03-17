@@ -116,7 +116,17 @@ def process_candidates_background(job_id, app_context):
                         log.info("bulk.process_candidates_background.no_ai_job_id")
 
 
-                    summary = generate_html_summary(full_candidate_data, job_data, interview_data, "", single_prompt, None, gemini_resume_file, client)
+                    summary = generate_html_summary(
+                        candidate_data=full_candidate_data,
+                        job_data=job_data,
+                        interview_data=interview_data,
+                        additional_context="",
+                        prompt_type=single_prompt,
+                        fireflies_data=None,
+                        quil_data=None,
+                        gemini_resume_file=gemini_resume_file,
+                        client=client
+                    )
 
                     if summary:
                         BULK_JOBS[job_id]['results'][slug] = {
@@ -331,8 +341,9 @@ def generate_bulk_email():
         }
 
         full_prompt = build_full_prompt(multi_prompt, "multiple", **prompt_kwargs)
+        bulk_email_model = data.get('gemini_matching_model', 'gemini-3-flash-preview')
         response = current_app.client.models.generate_content(
-            model='gemini-2.0-flash',
+            model=bulk_email_model,
             contents=[full_prompt]
         )
 

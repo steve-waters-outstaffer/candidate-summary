@@ -32,7 +32,7 @@ const SOURCE_ORDER = ['resume', 'anna_ai', 'quil', 'fireflies', 'additional_cont
 const SOURCE_LABELS = {
     resume: 'CV',
     anna_ai: 'Anna',
-    quil: 'Quil',
+    quil: 'CoRecruit',
     fireflies: 'Fireflies',
     additional_context: 'Context'
 };

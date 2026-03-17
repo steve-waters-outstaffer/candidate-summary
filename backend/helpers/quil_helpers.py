@@ -19,7 +19,7 @@ else:
 
 
 class QuilLinkParser(HTMLParser):
-    """HTML parser to extract Quil meeting links from note descriptions"""
+    """HTML parser to extract CoRecruit meeting links from note descriptions"""
     def __init__(self):
         super().__init__()
         self.quil_url = None
@@ -27,7 +27,7 @@ class QuilLinkParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag == 'a':
             for attr, value in attrs:
-                if attr == 'href' and 'salesq.app' in value:
+                if attr == 'href' and 'app.corecruit.com' in value:
                     self.quil_url = value
 
 
@@ -50,14 +50,14 @@ def extract_quil_data(note_description: str) -> Optional[Dict]:
     """
     log.info("quil.extract_quil_data.called")
     
-    if not note_description or not note_description.startswith('Quil '):
-        log.info("quil.extract_quil_data.not_quil_note")
+    if not note_description or not note_description.startswith('CoRecruit '):
+        log.info("quil.extract_quil_data.not_corecruit_note")
         return None
     
     try:
         # Extract date and title from first line
         first_line = note_description.split('<br/>')[0] if '<br/>' in note_description else note_description.split('\n')[0]
-        header_match = re.match(r'Quil (\d{1,2}/\d{1,2}/\d{4}): (.+)', first_line)
+        header_match = re.match(r'CoRecruit (\d{1,2}/\d{1,2}/\d{4}): (.+)', first_line)
         
         # Extract summary content between markers
         summary_match = re.search(
@@ -66,15 +66,22 @@ def extract_quil_data(note_description: str) -> Optional[Dict]:
             re.DOTALL
         )
         
-        # Extract Quil URL
+        # Extract CoRecruit URL - try HTML link first, then plain text fallback
         parser = QuilLinkParser()
         parser.feed(note_description)
+        corecruit_url = parser.quil_url
+        
+        # Fallback: scan for plain text URL (e.g. "View in CoRecruit\nhttps://app.corecruit.com/...")
+        if not corecruit_url:
+            url_match = re.search(r'https://app\.corecruit\.com/\S+', note_description)
+            if url_match:
+                corecruit_url = url_match.group(0)
         
         result = {
             'date': header_match.group(1) if header_match else None,
             'title': header_match.group(2).strip() if header_match else None,
             'summary_html': summary_match.group(1).strip() if summary_match else None,
-            'quil_link': parser.quil_url
+            'quil_link': corecruit_url  # key name kept for backwards compatibility
         }
         
         log.info("quil.extract_quil_data.success", 
@@ -91,7 +98,8 @@ def select_best_quil_note_with_gemini(
     quil_notes: List[Dict],
     job_slug: str,
     job_title: str,
-    job_description: str
+    job_description: str,
+    model: str = 'gemini-3-flash-preview'
 ) -> Optional[Dict]:
     """
     Use Gemini to select the best Quil interview note for a job.
@@ -137,9 +145,9 @@ def select_best_quil_note_with_gemini(
             }
             
             # Extract title from description if possible
-            if note['description'].startswith('Quil '):
+            if note['description'].startswith('CoRecruit '):
                 first_line = note['description'].split('<br/>')[0]
-                title_match = re.match(r'Quil \d{1,2}/\d{1,2}/\d{4}: (.+)', first_line)
+                title_match = re.match(r'CoRecruit \d{1,2}/\d{1,2}/\d{4}: (.+)', first_line)
                 if title_match:
                     note_info['title'] = title_match.group(1)
             
@@ -148,13 +156,13 @@ def select_best_quil_note_with_gemini(
         log.info("quil.select_best_note.calling_gemini", notes_prepared=len(notes_data))
         
         prompt = f"""
-You are analyzing Quil meeting notes to find the best interview note for a specific job.
+You are analyzing CoRecruit meeting notes to find the best interview note for a specific job.
 
 **Job Details:**
 Title: {job_title}
 Description: {job_description[:1000]}
 
-**Available Quil Notes ({len(quil_notes)} total):**
+**Available CoRecruit Notes ({len(quil_notes)} total):**
 {notes_data}
 
 **Your Task:**
@@ -185,7 +193,7 @@ If no notes contain actual interview content, return has_valid_interview=false a
         
         try:
             response = client.models.generate_content(
-                model='gemini-2.0-flash-exp',
+                model=model,
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -232,7 +240,8 @@ def get_quil_interview_for_job(
     candidate_notes: List[Dict],
     job_slug: str,
     job_title: str,
-    job_description: str
+    job_description: str,
+    model: str = 'gemini-3-flash-preview'
 ) -> Optional[Dict]:
     """
     Get the Quil interview note that matches a specific job.
@@ -253,10 +262,10 @@ def get_quil_interview_for_job(
              total_notes=len(candidate_notes),
              candidate_notes_type=type(candidate_notes).__name__)
     
-    # Filter for Quil notes only
+    # Filter for CoRecruit notes only
     quil_notes = [
         note for note in candidate_notes 
-        if note.get('description', '').startswith('Quil ')
+        if note.get('description', '').startswith('CoRecruit ')
     ]
     
     log.info("quil.get_quil_interview_for_job.filtered",
@@ -264,7 +273,7 @@ def get_quil_interview_for_job(
              quil_notes_type=type(quil_notes).__name__)
     
     if not quil_notes:
-        log.info("quil.get_quil_interview_for_job.no_quil_notes")
+        log.info("quil.get_quil_interview_for_job.no_corecruit_notes")
         return None
     
     log.info("quil.get_quil_interview_for_job.found_quil_notes", 
@@ -276,7 +285,8 @@ def get_quil_interview_for_job(
         quil_notes, 
         job_slug, 
         job_title, 
-        job_description
+        job_description,
+        model=model
     )
     
     log.info("quil.get_quil_interview_for_job.gemini_returned",

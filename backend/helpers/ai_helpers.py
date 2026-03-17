@@ -149,10 +149,10 @@ def upload_resume_to_gemini(resume_info, client):
         log.error("ai.upload_resume.unexpected_error", error=str(e))
         return None
 
-def generate_ai_response(client, prompt_parts):
+def generate_ai_response(client, prompt_parts, model='gemini-3.1-pro-preview'):
     """Generates a response from the AI model."""
     try:
-        log.info("ai.generate_response.called", num_parts=len(prompt_parts))
+        log.info("ai.generate_response.called", num_parts=len(prompt_parts), model=model)
         
         # Debug: log what we're actually sending
         for i, part in enumerate(prompt_parts):
@@ -163,7 +163,7 @@ def generate_ai_response(client, prompt_parts):
                 log.info(f"ai.generate_response.part_{i}", type=part_type, preview=str(part)[:100])
         
         response = client.models.generate_content(
-            model='gemini-2.5-flash-preview-09-2025',
+            model=model,
             contents=prompt_parts
         )
         log.info("ai.generate_response.success")
@@ -175,7 +175,7 @@ def generate_ai_response(client, prompt_parts):
             log.error("ai.generate_response.response_details", response=str(e.response))
         return None
 
-def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, quil_data, gemini_resume_file, client):
+def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, quil_data, gemini_resume_file, client, model='gemini-3.1-pro-preview'):
     """Builds the full prompt and generates an HTML summary using the AI model."""
     full_prompt = build_full_prompt(
         prompt_type,
@@ -195,7 +195,7 @@ def generate_html_summary(candidate_data, job_data, interview_data, additional_c
         # Add the file reference
         contents.append(gemini_resume_file)
 
-    html_summary = generate_ai_response(client, contents)
+    html_summary = generate_ai_response(client, contents, model=model)
     if html_summary:
         return sub(r'^```(html)?\n|```$', '', html_summary, flags=MULTILINE).strip()
     return html_summary
