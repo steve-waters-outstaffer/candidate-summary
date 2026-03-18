@@ -30,8 +30,92 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import { authFetch } from '../services/apiService';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+// Variable groups — each group declares which category/type combos it appears in.
+// category: 'single' | 'multiple'   type: 'summary' | 'email'
+const VARIABLE_GROUPS = [
+    {
+        label: 'Candidate Data',
+        categories: ['single'],
+        types: ['summary', 'email'],
+        vars: [
+            { tag: '{{candidate_name}}',     desc: 'Full name' },
+            { tag: '{{candidate_email}}',    desc: 'Email address' },
+            { tag: '{{candidate_phone}}',    desc: 'Phone number' },
+            { tag: '{{candidate_location}}', desc: 'Location / city' },
+            { tag: '{{candidate_summary}}',  desc: 'Bio / profile summary' },
+        ],
+    },
+    {
+        label: 'Job Data',
+        categories: ['single', 'multiple'],
+        types: ['summary', 'email'],
+        vars: [
+            { tag: '{{job_title}}',        desc: 'Job title' },
+            { tag: '{{job_description}}',  desc: 'Full job description' },
+            { tag: '{{job_requirements}}', desc: 'Key requirements' },
+        ],
+    },
+    {
+        label: 'Interview Data',
+        categories: ['single'],
+        types: ['summary', 'email'],
+        vars: [
+            { tag: '{{quil_interview}}',        desc: 'CoRecruit interview notes' },
+            { tag: '{{ai_interview}}',           desc: 'AlphaRun AI interview' },
+            { tag: '{{fireflies_transcript}}',   desc: 'Fireflies call transcript' },
+        ],
+    },
+    {
+        label: 'Multiple Candidates',
+        categories: ['multiple'],
+        types: ['summary', 'email'],
+        vars: [
+            { tag: '{{candidate_list}}',  desc: 'Formatted list of all candidates' },
+            { tag: '{{candidate_count}}', desc: 'Number of candidates' },
+        ],
+    },
+    {
+        label: 'Context',
+        categories: ['single', 'multiple'],
+        types: ['summary', 'email'],
+        vars: [
+            { tag: '{{additional_context}}', desc: 'Extra notes / user-supplied context' },
+        ],
+    },
+];
+
+const codeStyle = { bgcolor: 'grey.200', px: 0.5, py: 0.25, borderRadius: 0.5, fontFamily: 'monospace', fontSize: '0.8rem' };
+
+const VariablesPanel = ({ category = 'single', type = 'summary' }) => {
+    const visibleGroups = VARIABLE_GROUPS.filter(
+        g => g.categories.includes(category) && g.types.includes(type)
+    );
+
+    return (
+        <Paper sx={{ flex: 1, p: 2, bgcolor: 'grey.50', maxHeight: '80vh', overflowY: 'auto', position: 'sticky', top: 16 }}>
+            <Typography variant="h6" gutterBottom>Available Variables</Typography>
+            <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
+                Showing variables for <strong>{category}</strong> / <strong>{type}</strong>.
+                Change Category or Type above to update this list.
+            </Alert>
+            {visibleGroups.map(group => (
+                <Box key={group.label} sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 'bold' }}>
+                        {group.label}
+                    </Typography>
+                    {group.vars.map(({ tag, desc }) => (
+                        <Box key={tag} sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.5 }}>
+                            <Box component="code" sx={codeStyle}>{tag}</Box>
+                            <Typography variant="caption" color="text.secondary">{desc}</Typography>
+                        </Box>
+                    ))}
+                </Box>
+            ))}
+        </Paper>
+    );
+};
 
 const PromptAdmin = () => {
     const [prompts, setPrompts] = useState([]);
@@ -47,7 +131,7 @@ const PromptAdmin = () => {
     const loadPrompts = async () => {
         try {
             setLoading(true);
-            const response = await fetch(`${API_URL}/api/admin/prompts`);
+            const response = await authFetch('/api/admin/prompts');
             const data = await response.json();
             if (data.success) {
                 setPrompts(data.prompts);
@@ -97,16 +181,13 @@ const PromptAdmin = () => {
 
     const handleSave = async () => {
         try {
-            const url = currentPrompt.id 
-                ? `${API_URL}/api/admin/prompts/${currentPrompt.id}`
-                : `${API_URL}/api/admin/prompts`;
-            
+            const path = currentPrompt.id
+                ? `/api/admin/prompts/${currentPrompt.id}`
+                : '/api/admin/prompts';
             const method = currentPrompt.id ? 'PUT' : 'POST';
-            
-            const response = await fetch(url, {
+            const response = await authFetch(path, {
                 method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentPrompt)
+                body: JSON.stringify(currentPrompt),
             });
 
             const data = await response.json();
@@ -126,11 +207,8 @@ const PromptAdmin = () => {
 
     const handleDelete = async (promptId) => {
         if (!confirm('Are you sure you want to delete this prompt?')) return;
-
         try {
-            const response = await fetch(`${API_URL}/api/admin/prompts/${promptId}`, {
-                method: 'DELETE'
-            });
+            const response = await authFetch(`/api/admin/prompts/${promptId}`, { method: 'DELETE' });
 
             const data = await response.json();
             
@@ -148,10 +226,9 @@ const PromptAdmin = () => {
 
     const handleToggleEnabled = async (prompt) => {
         try {
-            const response = await fetch(`${API_URL}/api/admin/prompts/${prompt.id}`, {
+            const response = await authFetch(`/api/admin/prompts/${prompt.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...prompt, enabled: !prompt.enabled })
+                body: JSON.stringify({ ...prompt, enabled: !prompt.enabled }),
             });
 
             const data = await response.json();
@@ -168,9 +245,7 @@ const PromptAdmin = () => {
 
     const handleSetDefault = async (prompt) => {
         try {
-            const response = await fetch(`${API_URL}/api/admin/prompts/${prompt.id}/set-default`, {
-                method: 'POST'
-            });
+            const response = await authFetch(`/api/admin/prompts/${prompt.id}/set-default`, { method: 'POST' });
 
             const data = await response.json();
             
@@ -372,70 +447,8 @@ const PromptAdmin = () => {
                         />
                     </Box>
 
-                    {/* Template Variables Reference */}
-                    <Paper 
-                        sx={{ 
-                            flex: 1, 
-                            p: 2, 
-                            bgcolor: 'grey.50',
-                            maxHeight: '80vh',
-                            overflowY: 'auto',
-                            position: 'sticky',
-                            top: 16
-                        }}
-                    >
-                        <Typography variant="h6" gutterBottom>
-                            Available Variables
-                        </Typography>
-                        
-                        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, fontWeight: 'bold' }}>
-                            Candidate Data
-                        </Typography>
-                        <Box sx={{ fontSize: '0.875rem', '& code': { bgcolor: 'grey.200', px: 0.5, py: 0.25, borderRadius: 0.5 } }}>
-                            <div><code>{'{{candidate_name}}'}</code> - Full name</div>
-                            <div><code>{'{{candidate_email}}'}</code> - Email</div>
-                            <div><code>{'{{candidate_phone}}'}</code> - Phone</div>
-                            <div><code>{'{{candidate_location}}'}</code> - Location</div>
-                            <div><code>{'{{candidate_summary}}'}</code> - Bio/summary</div>
-                        </Box>
-
-                        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, fontWeight: 'bold' }}>
-                            Job Data
-                        </Typography>
-                        <Box sx={{ fontSize: '0.875rem', '& code': { bgcolor: 'grey.200', px: 0.5, py: 0.25, borderRadius: 0.5 } }}>
-                            <div><code>{'{{job_title}}'}</code> - Job title</div>
-                            <div><code>{'{{job_description}}'}</code> - Full JD</div>
-                            <div><code>{'{{job_requirements}}'}</code> - Requirements</div>
-                        </Box>
-
-                        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, fontWeight: 'bold' }}>
-                            Interview Data
-                        </Typography>
-                        <Box sx={{ fontSize: '0.875rem', '& code': { bgcolor: 'grey.200', px: 0.5, py: 0.25, borderRadius: 0.5 } }}>
-                            <div><code>{'{{quil_interview}}'}</code> - CoRecruit summary</div>
-                            <div><code>{'{{ai_interview}}'}</code> - AlphaRun interview</div>
-                            <div><code>{'{{fireflies_transcript}}'}</code> - Call transcript</div>
-                        </Box>
-
-                        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, fontWeight: 'bold' }}>
-                            Multiple Candidates
-                        </Typography>
-                        <Box sx={{ fontSize: '0.875rem', '& code': { bgcolor: 'grey.200', px: 0.5, py: 0.25, borderRadius: 0.5 } }}>
-                            <div><code>{'{{candidate_list}}'}</code> - List of candidates</div>
-                            <div><code>{'{{candidate_count}}'}</code> - Number of candidates</div>
-                        </Box>
-
-                        <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, fontWeight: 'bold' }}>
-                            Context
-                        </Typography>
-                        <Box sx={{ fontSize: '0.875rem', '& code': { bgcolor: 'grey.200', px: 0.5, py: 0.25, borderRadius: 0.5 } }}>
-                            <div><code>{'{{additional_context}}'}</code> - User notes</div>
-                        </Box>
-
-                        <Alert severity="info" sx={{ mt: 2, fontSize: '0.75rem' }}>
-                            Variables are automatically replaced when generating summaries. Not all variables are available in all contexts.
-                        </Alert>
-                    </Paper>
+                    {/* Context-Aware Variables Reference */}
+                    <VariablesPanel category={currentPrompt?.category} type={currentPrompt?.type} />
                     </Box>
                 </DialogContent>
                 <DialogActions>

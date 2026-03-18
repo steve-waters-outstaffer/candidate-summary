@@ -52,18 +52,15 @@ const CandidateSummaryGenerator = () => {
         job_slug: '',
         alpharun_job_id: '',
         interview_id: '',
-        additional_context: '',
-        fireflies_url: ''
+        additional_context: ''
     });
 
     const [recruitCrmUrl, setRecruitCrmUrl] = useState('');
-    const [firefliesUrl, setFirefliesUrl] = useState('');
 
     const [apiStatus, setApiStatus] = useState({
         candidate: { status: 'pending', message: '', data: null },
         job: { status: 'pending', message: '', data: null },
         interview: { status: 'pending', message: '', data: null },
-        fireflies: { status: 'pending', message: '', data: null },
         quil: { status: 'pending', message: '', data: null },
         resume: { status: 'pending', message: '', data: null }
     });
@@ -84,9 +81,6 @@ const CandidateSummaryGenerator = () => {
     const [pushing, setPushing] = useState(false);
     const [alert, setAlert] = useState({ show: false, type: 'info', message: '' });
     const [view, setView] = useState('preview');
-    const [includeFireflies, setIncludeFireflies] = useState(false);
-    const [useQuil, setUseQuil] = useState(false);
-    const [proceedWithoutInterview, setProceedWithoutInterview] = useState(false);
 
 
     const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
@@ -174,7 +168,7 @@ const CandidateSummaryGenerator = () => {
             const jobSlug = match[1];
             const candidateSlug = match[2];
 
-            showAlert('info', 'URL parsed. Confirming Job, Candidate & Interview...');
+            showAlert('info', 'URL parsed. Confirming all sources...');
 
             setFormData(prev => ({
                 ...prev,
@@ -185,73 +179,9 @@ const CandidateSummaryGenerator = () => {
             testApi('job', { job_slug: jobSlug });
             testApi('candidate', { candidate_slug: candidateSlug });
             testApi('interview', { candidate_slug: candidateSlug, job_slug: jobSlug });
+            testApi('quil', { candidate_slug: candidateSlug, job_slug: jobSlug });
         } else {
             showAlert('error', 'Could not parse the URL. Please check the format and try again.');
-        }
-    };
-
-    const handleFirefliesConfirm = () => {
-        if (!firefliesUrl) {
-            showAlert('error', 'Please paste the Fireflies URL first.');
-            return;
-        }
-        setFormData(prev => ({ ...prev, fireflies_url: firefliesUrl }));
-        testApi('fireflies', { transcript_url: firefliesUrl });
-    };
-
-    const handleQuilTest = async () => {
-        if (!formData.candidate_slug || !formData.job_slug) {
-            showAlert('error', 'Please confirm candidate and job first.');
-            return;
-        }
-        
-        if (!API_BASE_URL) return;
-        
-        setApiStatus(prev => ({ ...prev, quil: { status: 'loading', message: 'Searching for CoRecruit notes...', data: null } }));
-        
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/test-quil`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    candidate_slug: formData.candidate_slug,
-                    job_slug: formData.job_slug
-                })
-            });
-            
-            const data = await response.json();
-            
-            if (response.ok && data.success) {
-                setApiStatus(prev => ({ 
-                    ...prev, 
-                    quil: { 
-                        status: 'success', 
-                        message: `Found: ${data.matched_note?.job_title || 'Matched interview'}`, 
-                        data: data 
-                    } 
-                }));
-                showAlert('success', 'CoRecruit interview note found and matched!');
-            } else {
-                setApiStatus(prev => ({ 
-                    ...prev, 
-                    quil: { 
-                        status: 'error', 
-                        message: data.error || 'No CoRecruit notes found', 
-                        data: null 
-                    } 
-                }));
-                showAlert('error', data.error || 'No CoRecruit interview notes found for this candidate/job');
-            }
-        } catch (error) {
-            setApiStatus(prev => ({ 
-                ...prev, 
-                quil: { 
-                    status: 'error', 
-                    message: 'Network error', 
-                    data: null 
-                } 
-            }));
-            showAlert('error', `Network error: ${error.message}`);
         }
     };
 
@@ -260,19 +190,16 @@ const CandidateSummaryGenerator = () => {
             candidate: { status: 'pending', message: '', data: null },
             job: { status: 'pending', message: '', data: null },
             interview: { status: 'pending', message: '', data: null },
-            fireflies: { status: 'pending', message: '', data: null },
             quil: { status: 'pending', message: '', data: null },
             resume: { status: 'pending', message: '', data: null }
         });
         setRecruitCrmUrl('');
-        setFirefliesUrl('');
         setFormData({
             candidate_slug: '',
             job_slug: '',
             alpharun_job_id: '',
             interview_id: '',
-            additional_context: '',
-            fireflies_url: ''
+            additional_context: ''
         });
         setGeneratedHtml('');
         setGeneratedEmailHtml('');
@@ -280,9 +207,6 @@ const CandidateSummaryGenerator = () => {
         setFeedbackSubmitted(false);
         setShowFeedbackComment(false);
         setFeedbackComment('');
-        setIncludeFireflies(false);
-        setUseQuil(false);
-        setProceedWithoutInterview(false);
         setCreateEmailDraft(false);
     };
 
@@ -318,10 +242,8 @@ const CandidateSummaryGenerator = () => {
         if (!API_BASE_URL) return;
 
         const baseApisSuccess = apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success';
-        const interviewApiSuccess = apiStatus.interview.status === 'success' || proceedWithoutInterview;
-        const firefliesApiSuccess = !includeFireflies || apiStatus.fireflies.status === 'success';
 
-        if (!baseApisSuccess || !interviewApiSuccess || !firefliesApiSuccess) {
+        if (!baseApisSuccess) {
             showAlert('error', 'Please ensure all required details are confirmed successfully.');
             return;
         }
@@ -342,16 +264,8 @@ const CandidateSummaryGenerator = () => {
         
         try {
             const basePayload = { ...formData };
-            if (!includeFireflies) {
-                delete basePayload.fireflies_url;
-            }
-            if (proceedWithoutInterview) {
-                delete basePayload.interview_id;
-                delete basePayload.alpharun_job_id;
-            }
-            
-            // Add use_quil flag to payload
-            basePayload.use_quil = useQuil;
+            // Always use CoRecruit notes if available (checked automatically on URL parse)
+            basePayload.use_quil = true;
 
             // Generate summary (and optionally email) in parallel
             const requests = [
@@ -542,15 +456,15 @@ const CandidateSummaryGenerator = () => {
         setView(newValue);
     };
 
+    // Only block generation if the core data (candidate + job) isn't confirmed
     const isGenerateDisabled = loading ||
-        !(apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success') ||
-        !(apiStatus.interview.status === 'success' || proceedWithoutInterview) ||
-        !(!includeFireflies || apiStatus.fireflies.status === 'success');
+        !(apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success');
 
-    const showProceedWithoutInterviewSwitch = apiStatus.candidate.status !== 'pending' &&
-        apiStatus.job.status !== 'pending' &&
-        apiStatus.interview.status !== 'success' &&
-        apiStatus.interview.status !== 'loading';
+    // Show warning if Anna AI or CoRecruit aren't found (but don't block)
+    const showInterviewWarning = apiStatus.candidate.status === 'success' &&
+        apiStatus.job.status === 'success' &&
+        apiStatus.interview.status === 'error' &&
+        apiStatus.quil.status === 'error';
 
     return (
         <Box>
@@ -565,66 +479,58 @@ const CandidateSummaryGenerator = () => {
                                 <Button fullWidth variant="outlined" onClick={handleParseAndConfirm} disabled={!recruitCrmUrl}>Parse URL & Confirm Details</Button>
                             </Box>
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: Spacing.Medium, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Job Description:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.job.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.job.status) }}>{apiStatus.job.data?.job_name || apiStatus.job.message || 'Pending URL Parse'}</Typography></Box></Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Candidate Profile:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.candidate.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.candidate.status) }}>{apiStatus.candidate.data?.candidate_name || apiStatus.candidate.message || 'Pending URL Parse'}</Typography></Box></Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Anna Ai Interview:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.interview.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.interview.status) }}>{ (apiStatus.interview.data?.candidate_name && `Confirmed: ${apiStatus.interview.data.candidate_name}`) || apiStatus.interview.message || 'Pending IDs'}</Typography></Box></Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Candidate Resume:</Typography><Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>{getStatusIcon(apiStatus.resume.status)}<Typography variant="body2" sx={{ color: getStatusColor(apiStatus.resume.status) }}>{apiStatus.resume.data?.resume_name || apiStatus.resume.message || 'Pending Candidate'}</Typography></Box></Box>
-                            </Box>
-
-                            {showProceedWithoutInterviewSwitch && (
-                                <FormControlLabel
-                                    control={<Switch checked={proceedWithoutInterview} onChange={(e) => setProceedWithoutInterview(e.target.checked)} name="proceedWithoutInterview" />}
-                                    label="Proceed without Anna AI Interview"
-                                    sx={{ mb: Spacing.Small }}
-                                />
-                            )}
-
-                            <Divider sx={{ my: Spacing.Medium }} />
-                            <FormControlLabel control={<Switch checked={includeFireflies} onChange={(e) => setIncludeFireflies(e.target.checked)} name="includeFireflies" />} label="Include Fireflies.ai Transcript" sx={{ mb: Spacing.Small }} />
-                            <Collapse in={includeFireflies}>
-                                <Box sx={{ mb: Spacing.Medium, mt: Spacing.Small }}>
-                                    <TextField fullWidth label="Fireflies.ai Transcript URL" value={firefliesUrl} onChange={(e) => setFirefliesUrl(e.target.value)} sx={{ mb: Spacing.Small }} />
-                                    <Button fullWidth variant="outlined" onClick={handleFirefliesConfirm} disabled={!firefliesUrl}>Confirm Transcript</Button>
-                                </Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, border: '1px solid #eee', borderRadius: 1, mb: Spacing.Medium }}>
-                                    <Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>Transcript:</Typography>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Job Description:</Typography>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        {getStatusIcon(apiStatus.fireflies.status)}
-                                        <Typography variant="body2" sx={{ color: getStatusColor(apiStatus.fireflies.status) }}>
-                                            {apiStatus.fireflies.data?.meeting_title || apiStatus.fireflies.message || 'Pending URL'}
+                                        {getStatusIcon(apiStatus.job.status)}
+                                        <Typography variant="body2" sx={{ color: getStatusColor(apiStatus.job.status) }}>
+                                            {apiStatus.job.data?.job_name || apiStatus.job.message || 'Pending URL Parse'}
                                         </Typography>
                                     </Box>
                                 </Box>
-                            </Collapse>
-                            
-                            <Divider sx={{ my: Spacing.Medium }} />
-                            
-                            <FormControlLabel 
-                                control={<Switch checked={useQuil} onChange={(e) => setUseQuil(e.target.checked)} name="useQuil" />} 
-                                label="Use CoRecruit Interview Notes" 
-                                sx={{ mb: Spacing.Small }} 
-                            />
-                            <Collapse in={useQuil}>
-                                <Box sx={{ mb: Spacing.Medium, mt: Spacing.Small }}>
-                                    <Button 
-                                        fullWidth 
-                                        variant="outlined" 
-                                        onClick={handleQuilTest} 
-                                        disabled={!formData.candidate_slug || !formData.job_slug}
-                                    >
-                                        Test CoRecruit Notes
-                                    </Button>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Candidate Profile:</Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        {getStatusIcon(apiStatus.candidate.status)}
+                                        <Typography variant="body2" sx={{ color: getStatusColor(apiStatus.candidate.status) }}>
+                                            {apiStatus.candidate.data?.candidate_name || apiStatus.candidate.message || 'Pending URL Parse'}
+                                        </Typography>
+                                    </Box>
                                 </Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, border: '1px solid #eee', borderRadius: 1, mb: Spacing.Medium }}>
-                                    <Typography variant="body1" sx={{fontWeight: FontWeight.Medium}}>CoRecruit Interview:</Typography>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Anna AI Interview:</Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        {getStatusIcon(apiStatus.interview.status)}
+                                        <Typography variant="body2" sx={{ color: getStatusColor(apiStatus.interview.status) }}>
+                                            {(apiStatus.interview.data?.candidate_name && `Confirmed: ${apiStatus.interview.data.candidate_name}`) || apiStatus.interview.message || 'Pending URL Parse'}
+                                        </Typography>
+                                    </Box>
+                                </Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>CoRecruit Interview:</Typography>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                         {getStatusIcon(apiStatus.quil.status)}
                                         <Typography variant="body2" sx={{ color: getStatusColor(apiStatus.quil.status) }}>
-                                            {apiStatus.quil.data?.matched_note?.job_title || apiStatus.quil.message || 'Pending Test'}
+                                            {apiStatus.quil.data?.matched_title || apiStatus.quil.message || 'Pending URL Parse'}
                                         </Typography>
                                     </Box>
                                 </Box>
-                            </Collapse>
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Typography variant="body1" sx={{ fontWeight: FontWeight.Medium }}>Candidate Resume:</Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        {getStatusIcon(apiStatus.resume.status)}
+                                        <Typography variant="body2" sx={{ color: getStatusColor(apiStatus.resume.status) }}>
+                                            {apiStatus.resume.data?.resume_name || apiStatus.resume.message || 'Pending Candidate'}
+                                        </Typography>
+                                    </Box>
+                                </Box>
+                            </Box>
+
+                            {showInterviewWarning && (
+                                <Alert severity="warning" sx={{ mb: Spacing.Medium }}>
+                                    No interview data found (Anna AI or CoRecruit). Summary will be based on CV and job description only.
+                                </Alert>
+                            )}
                             
                             <Divider sx={{ my: Spacing.Medium }} />
                             <TextField fullWidth multiline rows={4} label="Additional Context (Optional)" name="additional_context" value={formData.additional_context} onChange={handleInputChange} sx={{ mb: Spacing.Medium }} />

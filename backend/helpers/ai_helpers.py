@@ -175,7 +175,7 @@ def generate_ai_response(client, prompt_parts, model='gemini-3.1-pro-preview'):
             log.error("ai.generate_response.response_details", response=str(e.response))
         return None
 
-def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, fireflies_data, quil_data, gemini_resume_file, client, model='gemini-3.1-pro-preview'):
+def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, quil_data, gemini_resume_file, client, model='gemini-3.1-pro-preview'):
     """Builds the full prompt and generates an HTML summary using the AI model."""
     full_prompt = build_full_prompt(
         prompt_type,
@@ -184,7 +184,6 @@ def generate_html_summary(candidate_data, job_data, interview_data, additional_c
         job_data=job_data.get('data', job_data),
         interview_data=interview_data.get('data', interview_data) if interview_data else {},
         additional_context=additional_context,
-        fireflies_data=fireflies_data,
         quil_data=quil_data
     )
     

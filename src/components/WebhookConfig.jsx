@@ -18,6 +18,7 @@ import {
     Paper
 } from '@mui/material';
 import { Save as SaveIcon, Refresh as RefreshIcon } from '@mui/icons-material';
+import { authFetch } from '../services/apiService';
 
 const WebhookConfig = () => {
     const [loading, setLoading] = useState(true);
@@ -57,7 +58,7 @@ const WebhookConfig = () => {
     const loadConfig = async () => {
         try {
             setLoading(true);
-            const response = await fetch(`${API_BASE_URL}/api/webhook-config`);
+            const response = await authFetch('/api/webhook-config');
             if (!response.ok) throw new Error('Failed to load config');
             const data = await response.json();
             // Merge loaded data with defaults to ensure all fields are present
@@ -84,12 +85,10 @@ const WebhookConfig = () => {
     const handleSave = async () => {
         try {
             setSaving(true);
-            const response = await fetch(`${API_BASE_URL}/api/webhook-config`, {
+            const response = await authFetch('/api/webhook-config', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             });
-
             if (!response.ok) throw new Error('Failed to save config');
 
             showAlert('success', 'Configuration saved successfully');

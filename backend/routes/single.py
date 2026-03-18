@@ -30,17 +30,9 @@ try:
     )
     log.info("routes.single: Successfully imported from helpers.recruitcrm_helpers.")
 
-    log.info("routes.single: Importing from helpers.quil_helpers...")
-    from helpers.quil_helpers import get_quil_interview_for_job
-    log.info("routes.single: Successfully imported from helpers.quil_helpers.")
-
-    log.info("routes.single: Importing from helpers.fireflies_helpers...")
-    from helpers.fireflies_helpers import (
-        extract_fireflies_transcript_id,
-        fetch_fireflies_transcript,
-        normalise_fireflies_transcript
-    )
-    log.info("routes.single: Successfully imported from helpers.fireflies_helpers.")
+    log.info("routes.single: Importing from helpers.corecruit_helpers...")
+    from helpers.quil_helpers import get_corecruit_interview_for_job
+    log.info("routes.single: Successfully imported from helpers.corecruit_helpers.")
 
     log.info("routes.single: Importing from helpers.ai_helpers...")
     from helpers.ai_helpers import (
@@ -172,30 +164,6 @@ def test_interview():
         })
     return jsonify({'error': 'Failed to fetch interview data'}), 404
 
-@single_bp.route('/test-fireflies', methods=['POST'])
-def test_fireflies():
-    """Tests the connection to the Fireflies API and returns the meeting title."""
-    log.info("single.test_fireflies.hit")
-    data = request.get_json()
-
-    # Check for both 'fireflies_url' and 'transcript_url' to handle inconsistency
-    transcript_url = data.get('fireflies_url') or data.get('transcript_url')
-
-    if not transcript_url:
-        return jsonify({'error': 'Missing fireflies_url or transcript_url'}), 400
-
-    transcript_id = extract_fireflies_transcript_id(transcript_url)
-    if not transcript_id:
-        return jsonify({'error': 'Invalid Fireflies URL or Transcript ID'}), 400
-
-    transcript_data = fetch_fireflies_transcript(transcript_id)
-    if transcript_data:
-        return jsonify({
-            'success': True,
-            'message': 'Transcript confirmed',
-            'meeting_title': transcript_data.get('title', 'Unknown Title')
-        })
-    return jsonify({'error': 'Failed to fetch transcript data from Fireflies.ai'}), 404
 
 @single_bp.route('/test-quil', methods=['POST'])
 def test_quil():
@@ -241,12 +209,12 @@ def test_quil():
         log.info("single.test_quil.calling_get_quil_interview",
                  candidate_notes_type=type(candidate_notes).__name__,
                  job_slug=job_slug)
-        quil_data = get_quil_interview_for_job(
-            candidate_notes,
-            job_slug,
-            job_title,
-            job_description
-        )
+        quil_data = get_corecruit_interview_for_job(
+                candidate_notes,
+                job_slug,
+                job_title,
+                job_description
+            )
         log.info("single.test_quil.got_quil_data",
                  quil_data_type=type(quil_data).__name__ if quil_data else "None")
         
@@ -299,7 +267,6 @@ def generate_summary():
         data = request.get_json()
         candidate_slug = data.get('candidate_slug')
         job_slug = data.get('job_slug')
-        fireflies_url = data.get('fireflies_url')
         additional_context = data.get('additional_context', '')
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
         client = current_app.client
@@ -364,7 +331,7 @@ def generate_summary():
                 job_title = job_details.get('name', 'Unknown Job')
                 job_description = job_details.get('description', '')
                 
-                quil_data = get_quil_interview_for_job(
+                quil_data = get_corecruit_interview_for_job(
                     candidate_notes,
                     job_slug,
                     job_title,
@@ -381,20 +348,11 @@ def generate_summary():
                 log.error("single.generate_summary.quil_error", error=str(e))
         # --- END QUIL INTERVIEW LOGIC ---
 
-        fireflies_data = None
-        if fireflies_url:
-            transcript_id = extract_fireflies_transcript_id(fireflies_url)
-            if transcript_id:
-                raw_transcript = fetch_fireflies_transcript(transcript_id)
-                if raw_transcript:
-                    fireflies_data = normalise_fireflies_transcript(raw_transcript)
-
         # Track which sources will be sent to the prompt/generation step
         prompt_sources = {
             'resume': bool(gemini_resume_file),
             'anna_ai': bool(interview_data),
             'quil': bool(quil_data and quil_data.get('summary_html')),
-            'fireflies': bool(fireflies_data),
             'additional_context': bool(additional_context.strip()) if isinstance(additional_context, str) else bool(additional_context)
         }
 
@@ -421,7 +379,6 @@ def generate_summary():
             interview_data=interview_data,
             additional_context=additional_context,
             prompt_type=prompt_type,
-            fireflies_data=fireflies_data,
             quil_data=quil_data,
             gemini_resume_file=gemini_resume_file,
             client=client,

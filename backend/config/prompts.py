@@ -149,9 +149,8 @@ def build_full_prompt(prompt_type, prompt_category="single", **kwargs):
                   prompt_type=prompt_type)
         return None
 
-    # Build interview section (Quil takes priority over Fireflies)
+    # Build interview section (CoRecruit only)
     quil_data = kwargs.get('quil_data')
-    fireflies_data = kwargs.get('fireflies_data')
 
     interview_parts = []
 
@@ -162,14 +161,6 @@ def build_full_prompt(prompt_type, prompt_category="single", **kwargs):
             f"{quil_data['summary_html']}"
         )
 
-    if fireflies_data and fireflies_data.get('content') and not quil_data:
-        # Only include Fireflies if no Quil data
-        interview_parts.append(
-            "\n**RECRUITER-LED INTERVIEW (from Fireflies):**\n"
-            f"Title: {fireflies_data.get('metadata', {}).get('title', 'N/A')}\n"
-            f"{fireflies_data['content']}"
-        )
-
     interview_section = "\n".join(interview_parts) if interview_parts else "**RECRUITER-LED INTERVIEW:**\nNot provided."
 
     # Prepare format arguments
@@ -178,7 +169,6 @@ def build_full_prompt(prompt_type, prompt_category="single", **kwargs):
         'job_data': kwargs.get('job_data', ''),
         'interview_data': kwargs.get('interview_data', ''),
         'interview_section': interview_section,
-        'fireflies_section': interview_section,  # Alias for backwards compatibility
         'additional_context': kwargs.get('additional_context', ''),
         # Include all other kwargs for multiple-candidate templates
         **kwargs

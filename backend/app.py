@@ -16,6 +16,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import google.genai as genai
 from google.cloud import firestore
+import firebase_admin
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -113,6 +114,18 @@ try:
 except Exception as e:
     log.error("firestore_client.initialization_failed", error=str(e))
     app.db = None
+
+# --- Firebase Admin SDK (for ID token verification on admin routes) ---
+# On Cloud Run: uses Application Default Credentials automatically.
+# Locally: run `gcloud auth application-default login`
+try:
+    firebase_admin.initialize_app()
+    log.info("firebase_admin.initialized")
+except ValueError:
+    # Already initialised (e.g. during hot reload) — safe to ignore
+    log.info("firebase_admin.already_initialized")
+except Exception as e:
+    log.error("firebase_admin.initialization_failed", error=str(e))
 
 # --- NEW: Configure Segment ---
 try:

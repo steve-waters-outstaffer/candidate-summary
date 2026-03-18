@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, current_app
 import structlog
 from datetime import datetime
 from google.cloud.firestore_v1.base_query import FieldFilter
+from helpers.auth_helpers import require_auth
 
 log = structlog.get_logger()
 
@@ -11,6 +12,7 @@ admin_bp = Blueprint('admin', __name__)
 
 
 @admin_bp.route('/api/admin/prompts', methods=['GET'])
+@require_auth
 def list_prompts():
     """Get all prompts (for admin UI)"""
     try:
@@ -35,6 +37,7 @@ def list_prompts():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['GET'])
+@require_auth
 def get_prompt(prompt_id):
     try:
         db = current_app.db
@@ -50,6 +53,7 @@ def get_prompt(prompt_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/prompts', methods=['POST'])
+@require_auth
 def create_prompt():
     try:
         db = current_app.db
@@ -83,6 +87,7 @@ def create_prompt():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['PUT'])
+@require_auth
 def update_prompt(prompt_id):
     try:
         db = current_app.db
@@ -110,6 +115,7 @@ def update_prompt(prompt_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['DELETE'])
+@require_auth
 def delete_prompt(prompt_id):
     try:
         db = current_app.db
@@ -127,6 +133,7 @@ def delete_prompt(prompt_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>/set-default', methods=['POST'])
+@require_auth
 def set_default_prompt(prompt_id):
     try:
         db = current_app.db
@@ -149,6 +156,7 @@ def set_default_prompt(prompt_id):
 
 
 @admin_bp.route('/api/webhook-config', methods=['GET'])
+@require_auth
 def get_webhook_config():
     """Get webhook configuration"""
     try:
@@ -187,6 +195,7 @@ def get_webhook_config():
 
 
 @admin_bp.route('/api/webhook-config', methods=['PUT'])
+@require_auth
 def update_webhook_config():
     """Update webhook configuration"""
     try:
@@ -226,6 +235,7 @@ def update_webhook_config():
 
 
 @admin_bp.route('/api/summary-runs', methods=['GET'])
+@require_auth
 def get_summary_runs():
     """Get summary generation runs"""
     try:

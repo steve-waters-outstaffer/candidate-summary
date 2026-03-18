@@ -1,10 +1,7 @@
 # helpers/fireflies_helpers.py
-import os
-import re
-import requests
-import structlog
-from urllib.parse import urlparse
-from flask import json
+# DEPRECATED — Fireflies integration removed. This file is safe to delete.
+# All references have been removed from single.py, ai_helpers.py, and prompts.py.
+raise ImportError("fireflies_helpers is deprecated and should not be imported.")
 
 log = structlog.get_logger()
 

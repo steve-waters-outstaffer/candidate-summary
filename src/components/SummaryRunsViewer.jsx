@@ -27,6 +27,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DescriptionIcon from '@mui/icons-material/Description';
+import { authFetch } from '../services/apiService';
 
 const SOURCE_ORDER = ['resume', 'anna_ai', 'quil', 'fireflies', 'additional_context'];
 const SOURCE_LABELS = {
@@ -62,8 +63,6 @@ const SummaryRunsViewer = () => {
     // Filters
     const [nameFilter, setNameFilter] = useState('');
     const [jobFilter, setJobFilter] = useState('');
-    
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
     useEffect(() => {
         loadRuns();
@@ -74,7 +73,7 @@ const SummaryRunsViewer = () => {
             setLoading(true);
             setError(null);
             
-            const response = await fetch(`${API_BASE_URL}/api/summary-runs?limit=50`);
+            const response = await authFetch('/api/summary-runs?limit=50');
             if (!response.ok) throw new Error('Failed to load runs');
             
             const data = await response.json();
