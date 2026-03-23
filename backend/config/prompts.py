@@ -163,12 +163,16 @@ def build_full_prompt(prompt_type, prompt_category="single", **kwargs):
 
     interview_section = "\n".join(interview_parts) if interview_parts else "**RECRUITER-LED INTERVIEW:**\nNot provided."
 
+    # Build fireflies section (for backwards compatibility with email prompts)
+    fireflies_section = interview_section  # Same content, different placeholder name
+
     # Prepare format arguments
     format_args = {
         'candidate_data': kwargs.get('candidate_data', ''),
         'job_data': kwargs.get('job_data', ''),
         'interview_data': kwargs.get('interview_data', ''),
         'interview_section': interview_section,
+        'fireflies_section': fireflies_section,
         'additional_context': kwargs.get('additional_context', ''),
         # Include all other kwargs for multiple-candidate templates
         **kwargs
