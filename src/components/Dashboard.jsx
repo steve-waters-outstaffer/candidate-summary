@@ -18,6 +18,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { logoutUser } from '../services/AuthService.js';
 import CandidateSummaryGenerator from './CandidateSummaryGenerator';
 import BulkGenerator from './BulkGenerator';
+import FloatingSummaryGenerator from './FloatingSummaryGenerator';
 import { CustomColors } from '../theme';
 
 // Lazy load admin components since they're heavy
@@ -51,7 +52,7 @@ const Dashboard = () => {
     };
 
     const handleSettingsClick = () => {
-        setCurrentTab(2); // Switch to Admin tab
+        setCurrentTab(3); // Switch to Admin tab (index shifted by Floating Summary at index 1)
     };
 
     return (
@@ -96,6 +97,7 @@ const Dashboard = () => {
                         onChange={handleTabChange}
                     >
                         <Tab label="Single Candidate Summary" />
+                        <Tab label="Floating Summary" />
                         <Tab label="Bulk Job Processor" />
                         {isAdmin && <Tab label="Prompt Admin" />}
                         {isAdmin && <Tab label="Summary Runs" />}
@@ -105,7 +107,8 @@ const Dashboard = () => {
 
                 <Box sx={{ pt: 3 }}>
                     {currentTab === 0 && <CandidateSummaryGenerator />}
-                    {currentTab === 1 && (
+                    {currentTab === 1 && <FloatingSummaryGenerator />}
+                    {currentTab === 2 && (
                         <BulkGenerator
                             jobId={bulkJobId}
                             setJobId={setBulkJobId}
@@ -113,17 +116,17 @@ const Dashboard = () => {
                             setJobStatus={setBulkJobStatus}
                         />
                     )}
-                    {currentTab === 2 && isAdmin && (
+                    {currentTab === 3 && isAdmin && (
                         <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}>
                             <PromptAdmin />
                         </Suspense>
                     )}
-                    {currentTab === 3 && isAdmin && (
+                    {currentTab === 4 && isAdmin && (
                         <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}>
                             <SummaryRunsViewer />
                         </Suspense>
                     )}
-                    {currentTab === 4 && isAdmin && (
+                    {currentTab === 5 && isAdmin && (
                         <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>}>
                             <WebhookConfig />
                         </Suspense>
