@@ -171,6 +171,10 @@ try:
     from routes.admin import admin_bp
     log.info("Successfully imported routes.admin.")
 
+    log.info("Importing routes.floating...")
+    from routes.floating import floating_bp
+    log.info("Successfully imported routes.floating.")
+
     log.info("blueprints_imported")
 
     log.info("registering_blueprints")
@@ -179,6 +183,7 @@ try:
     app.register_blueprint(bulk_bp, url_prefix='/api')
     app.register_blueprint(webhooks_bp, url_prefix='/api')
     app.register_blueprint(admin_bp)  # Admin routes already have /api prefix
+    app.register_blueprint(floating_bp, url_prefix='/api')
     log.info("blueprints_registered")
 
 except Exception as e:

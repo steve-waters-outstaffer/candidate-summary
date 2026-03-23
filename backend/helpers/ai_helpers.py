@@ -175,6 +175,29 @@ def generate_ai_response(client, prompt_parts, model='gemini-3.1-pro-preview'):
             log.error("ai.generate_response.response_details", response=str(e.response))
         return None
 
+def generate_floating_html_summary(candidate_data, additional_context, prompt_type, gemini_resume_file, client, model='gemini-3.1-pro-preview'):
+    """Builds the floating summary prompt (candidate-only) and generates HTML using the AI model."""
+    full_prompt = build_full_prompt(
+        prompt_type,
+        "floating",
+        candidate_data=candidate_data.get('data', candidate_data),
+        additional_context=additional_context
+    )
+
+    if not full_prompt:
+        log.error("ai.generate_floating_html_summary.no_prompt", prompt_type=prompt_type)
+        return None
+
+    contents = [full_prompt]
+    if gemini_resume_file:
+        contents.append(gemini_resume_file)
+
+    html_summary = generate_ai_response(client, contents, model=model)
+    if html_summary:
+        return sub(r'^```(html)?\n|```$', '', html_summary, flags=MULTILINE).strip()
+    return html_summary
+
+
 def generate_html_summary(candidate_data, job_data, interview_data, additional_context, prompt_type, quil_data, gemini_resume_file, client, model='gemini-3.1-pro-preview'):
     """Builds the full prompt and generates an HTML summary using the AI model."""
     full_prompt = build_full_prompt(
