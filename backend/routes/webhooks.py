@@ -110,7 +110,6 @@ def _process_recruitcrm_payload(app, payload: Dict[str, Any]) -> None:
                 interview_data=interview_data,
                 additional_context=additional_context,
                 prompt_type=prompt_type,
-                fireflies_data=None,
                 quil_data=None,
                 gemini_resume_file=gemini_resume_file,
                 client=client

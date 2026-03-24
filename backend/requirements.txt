@@ -13,6 +13,6 @@ google-auth-oauthlib==1.2.1
 google-auth-httplib2==0.2.0
 google-api-python-client==2.154.0
 pydantic==2.10.5
-xhtml2pdf==0.2.16
+weasyprint
 analytics-python
 firebase-admin==6.5.0

@@ -122,7 +122,6 @@ def process_candidates_background(job_id, app_context):
                         interview_data=interview_data,
                         additional_context="",
                         prompt_type=single_prompt,
-                        fireflies_data=None,
                         quil_data=None,
                         gemini_resume_file=gemini_resume_file,
                         client=client

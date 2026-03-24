@@ -6,8 +6,7 @@ from email.mime.application import MIMEApplication
 import structlog
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-from xhtml2pdf import pisa
-from io import BytesIO
+from helpers.pdf_helpers import generate_pdf_from_html
 
 log = structlog.get_logger()
 
@@ -34,16 +33,17 @@ def create_gmail_draft(user_access_token, subject, html_body, to_email=None, ref
         attachment_data = None
         if summary_html and pdf_filename:
             try:
-                pdf_buffer = BytesIO()
-                pisa_status = pisa.CreatePDF(summary_html, dest=pdf_buffer)
-                if not pisa_status.err:
-                    attachment_data = pdf_buffer.getvalue()
+                # Derive a clean name from the filename for the helper
+                name_part = pdf_filename.replace('.pdf', '').replace('_', ' ')
+                pdf_bytes, _ = generate_pdf_from_html(summary_html, name_part, '')
+                if pdf_bytes:
+                    attachment_data = pdf_bytes
                     log.info("gmail.pdf.generated", filename=pdf_filename)
                 else:
-                    log.error("gmail.pdf.generation_failed", error="pisa error")
+                    log.error("gmail.pdf.generation_failed", error="generate_pdf_from_html returned None")
             except Exception as pdf_error:
                 log.error("gmail.pdf.generation_failed", error=str(pdf_error))
-                # Continue without PDF - we'll create draft anyway
+                # Continue without PDF - draft will still be created
         
         # Build credentials with refresh capability if refresh_token provided
         if refresh_token and client_id and client_secret:

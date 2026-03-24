@@ -8,7 +8,7 @@ log = structlog.get_logger()
 log.info("routes.floating: Top of file, starting imports.")
 
 try:
-    from helpers.recruitcrm_helpers import fetch_recruitcrm_candidate
+    from helpers.recruitcrm_helpers import fetch_recruitcrm_candidate, fetch_candidate_notes, parse_alpharun_interview_from_notes
     from helpers.ai_helpers import upload_resume_to_gemini, generate_floating_html_summary
     from helpers.pdf_helpers import generate_pdf_from_html
     log.info("routes.floating: All imports successful.")
@@ -64,6 +64,27 @@ def floating_test_resume():
     return jsonify({'error': 'Failed to fetch candidate data'}), 404
 
 
+@floating_bp.route('/floating/test-interview', methods=['POST'])
+def floating_test_interview():
+    """Checks whether the candidate has an AI Interview Note on file."""
+    log.info("floating.test_interview.hit")
+    data = request.get_json()
+    candidate_slug = data.get('candidate_slug')
+    if not candidate_slug:
+        return jsonify({'error': 'Missing candidate_slug'}), 400
+
+    notes = fetch_candidate_notes(candidate_slug)
+    interview_content = parse_alpharun_interview_from_notes(notes)
+
+    if interview_content:
+        # Extract job opening name from first line if present
+        first_line = interview_content.split('\n')[0]
+        label = first_line.replace('Job Opening:', '').strip()[:60] if 'Job Opening:' in first_line else 'Interview found'
+        return jsonify({'success': True, 'message': label})
+
+    return jsonify({'success': False, 'message': 'No AI interview note found'})
+
+
 @floating_bp.route('/floating/generate-summary', methods=['POST'])
 def floating_generate_summary():
     """Generates an anonymous floating candidate summary HTML."""
@@ -85,12 +106,20 @@ def floating_generate_summary():
     resume_info = candidate_details.get('resume')
     gemini_resume_file = upload_resume_to_gemini(resume_info, client) if resume_info else None
 
+    # Fetch AI interview from candidate notes (no job context needed)
+    candidate_notes = fetch_candidate_notes(candidate_slug)
+    alpharun_interview = parse_alpharun_interview_from_notes(candidate_notes)
+    log.info("floating.generate_summary.interview_source",
+             candidate_slug=candidate_slug,
+             has_alpharun_interview=bool(alpharun_interview))
+
     html_summary = generate_floating_html_summary(
         candidate_data=candidate_data,
         additional_context=additional_context,
         prompt_type=prompt_type,
         gemini_resume_file=gemini_resume_file,
-        client=client
+        client=client,
+        alpharun_interview=alpharun_interview
     )
 
     if html_summary:

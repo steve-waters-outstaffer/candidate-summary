@@ -19,7 +19,8 @@ import {
     HelpOutline,
     ThumbUp,
     ThumbDown,
-    PictureAsPdf
+    PictureAsPdf,
+    InfoOutlined
 } from '@mui/icons-material';
 
 const CustomColors = {
@@ -38,6 +39,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const StatusIcon = ({ status }) => {
     if (status === 'success') return <CheckCircle sx={{ color: CustomColors.SecretGarden, fontSize: 20 }} />;
     if (status === 'error') return <Cancel sx={{ color: CustomColors.DarkRed, fontSize: 20 }} />;
+    if (status === 'warning') return <InfoOutlined sx={{ color: '#ED8936', fontSize: 20 }} />;
     if (status === 'loading') return <CircularProgress size={18} />;
     return <HelpOutline sx={{ color: CustomColors.UIGrey500, fontSize: 20 }} />;
 };
@@ -59,7 +61,8 @@ const FloatingSummaryGenerator = () => {
 
     const [apiStatus, setApiStatus] = useState({
         candidate: { status: 'pending', message: '', data: null },
-        resume: { status: 'pending', message: '', data: null }
+        resume: { status: 'pending', message: '', data: null },
+        interview: { status: 'pending', message: '', data: null }
     });
 
     const [generatedHtml, setGeneratedHtml] = useState('');
@@ -85,13 +88,14 @@ const FloatingSummaryGenerator = () => {
         setGeneratedHtml('');
         setFeedbackSubmitted(false);
 
-        // Kick off both checks in parallel
+        // Kick off all three checks in parallel
         setApiStatus({
             candidate: { status: 'loading', message: 'Checking...', data: null },
-            resume: { status: 'loading', message: 'Checking...', data: null }
+            resume: { status: 'loading', message: 'Checking...', data: null },
+            interview: { status: 'loading', message: 'Checking...', data: null }
         });
 
-        const [candidateRes, resumeRes] = await Promise.all([
+        const [candidateRes, resumeRes, interviewRes] = await Promise.all([
             fetch(`${API_BASE_URL}/api/floating/test-candidate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -99,6 +103,12 @@ const FloatingSummaryGenerator = () => {
             }).then(r => r.json()).catch(() => ({ error: 'Network error' })),
 
             fetch(`${API_BASE_URL}/api/floating/test-resume`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ candidate_slug: slug })
+            }).then(r => r.json()).catch(() => ({ error: 'Network error' })),
+
+            fetch(`${API_BASE_URL}/api/floating/test-interview`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ candidate_slug: slug })
@@ -115,6 +125,11 @@ const FloatingSummaryGenerator = () => {
                 status: resumeRes.success ? 'success' : 'error',
                 message: resumeRes.filename || resumeRes.message || resumeRes.error || 'No resume',
                 data: resumeRes
+            },
+            interview: {
+                status: interviewRes.success ? 'success' : 'warning',
+                message: interviewRes.message || interviewRes.error || 'No interview found',
+                data: interviewRes
             }
         });
     };
@@ -240,7 +255,8 @@ const FloatingSummaryGenerator = () => {
                                 <Box sx={{ mb: Spacing.Medium, p: Spacing.Small, border: `1px solid ${CustomColors.UIGrey300}`, borderRadius: 1 }}>
                                     {[
                                         { label: 'Candidate Profile', key: 'candidate' },
-                                        { label: 'Candidate Resume', key: 'resume' }
+                                        { label: 'Candidate Resume', key: 'resume' },
+                                        { label: 'AI Interview Note', key: 'interview' }
                                     ].map(({ label, key }) => (
                                         <Box key={key} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.75 }}>
                                             <StatusIcon status={apiStatus[key].status} />

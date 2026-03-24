@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system dependencies for python-magic and build tools for pycairo
+# Install system dependencies for python-magic, build tools, and WeasyPrint (Pango/Cairo)
 RUN apt-get update && apt-get install -y \
     libmagic1 \
     libmagic-dev \
@@ -10,6 +10,10 @@ RUN apt-get update && apt-get install -y \
     libcairo2-dev \
     pkg-config \
     python3-dev \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libffi-dev \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

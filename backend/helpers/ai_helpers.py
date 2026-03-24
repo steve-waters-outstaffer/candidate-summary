@@ -175,13 +175,14 @@ def generate_ai_response(client, prompt_parts, model='gemini-3.1-pro-preview'):
             log.error("ai.generate_response.response_details", response=str(e.response))
         return None
 
-def generate_floating_html_summary(candidate_data, additional_context, prompt_type, gemini_resume_file, client, model='gemini-3.1-pro-preview'):
+def generate_floating_html_summary(candidate_data, additional_context, prompt_type, gemini_resume_file, client, model='gemini-3.1-pro-preview', alpharun_interview=None):
     """Builds the floating summary prompt (candidate-only) and generates HTML using the AI model."""
     full_prompt = build_full_prompt(
         prompt_type,
         "floating",
         candidate_data=candidate_data.get('data', candidate_data),
-        additional_context=additional_context
+        additional_context=additional_context,
+        alpharun_interview=alpharun_interview or "Not available."
     )
 
     if not full_prompt:

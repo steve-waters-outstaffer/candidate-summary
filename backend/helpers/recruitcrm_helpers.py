@@ -258,3 +258,66 @@ def set_candidate_stage_by_slug(candidate_slug, job_slug, new_status_id):
             error=str(e)
         )
         return None
+
+
+def parse_alpharun_interview_from_notes(notes: list) -> str | None:
+    """
+    Scans candidate notes for an 'AI Interview Note' and returns its
+    content as a clean text block for use in prompt generation.
+
+    The note format from the screenshot:
+      - description_type label: 'AI Interview Note'
+      - OR description starts with 'Job Opening:' and contains 'AI Interview Link:'
+
+    Returns a formatted string ready to drop into the prompt, or None if not found.
+    """
+    log.info("recruitcrm.parse_alpharun_interview_from_notes.called",
+             note_count=len(notes) if notes else 0)
+
+    if not notes:
+        return None
+
+    # Filter for AI Interview Notes — check note type label or description content
+    ai_interview_notes = []
+    for note in notes:
+        note_type = note.get('note_type', {}) or {}
+        type_label = note_type.get('label', '') if isinstance(note_type, dict) else ''
+        description = note.get('description', '')
+
+        is_ai_note = (
+            type_label == 'AI Interview Note'
+            or 'AI Interview Link:' in description
+            or description.strip().startswith('Job Opening:')
+        )
+        if is_ai_note:
+            ai_interview_notes.append(note)
+
+    if not ai_interview_notes:
+        log.info("recruitcrm.parse_alpharun_interview_from_notes.none_found")
+        return None
+
+    # Sort by created_on descending — take most recent
+    def sort_key(n):
+        return n.get('created_on') or ''
+    ai_interview_notes.sort(key=sort_key, reverse=True)
+    best = ai_interview_notes[0]
+
+    log.info("recruitcrm.parse_alpharun_interview_from_notes.found",
+             note_id=best.get('id'),
+             created_on=best.get('created_on'))
+
+    # Strip any HTML tags from the description for clean text
+    import re
+    description = best.get('description', '')
+    clean = re.sub(r'<[^>]+>', ' ', description)   # remove HTML tags
+    clean = re.sub(r'[ \t]+', ' ', clean)           # collapse spaces
+    clean = re.sub(r'\n{3,}', '\n\n', clean)        # collapse blank lines
+    clean = clean.strip()
+
+    if not clean:
+        log.info("recruitcrm.parse_alpharun_interview_from_notes.empty_after_clean")
+        return None
+
+    log.info("recruitcrm.parse_alpharun_interview_from_notes.success",
+             content_length=len(clean))
+    return clean
