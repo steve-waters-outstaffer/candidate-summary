@@ -6,6 +6,7 @@ from collections import defaultdict
 from flask import Blueprint, request, jsonify, current_app
 import uuid
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import structlog
 from helpers.recruitcrm_helpers import (
     fetch_recruitcrm_assigned_candidates,
@@ -32,17 +33,122 @@ log = structlog.get_logger()
 
 bulk_bp = Blueprint('bulk_api', __name__)
 
-def process_candidates_background(job_id, app_context):
+def process_single_candidate(slug, job_id, job_slug, single_prompt, alpharun_job_id, job_data, flask_app, job_lock):
+    """
+    Processes a single candidate in the background.
+    Used by process_candidates_background via ThreadPoolExecutor.
+    """
+    # Create a fresh application context for each worker thread to avoid race conditions.
+    with flask_app.app_context():
+        client = current_app.client
+        log.info("bulk.process_single_candidate.started", job_id=job_id, candidate_slug=slug)
+        try:
+            full_candidate_data = fetch_recruitcrm_candidate(slug)
+            if not full_candidate_data:
+                raise Exception("Could not fetch candidate data.")
+
+            candidate_details_data = full_candidate_data.get('data', full_candidate_data)
+
+            job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(slug, job_slug)
+            if job_specific_fields:
+                if 'custom_fields' in candidate_details_data:
+                    candidate_details_data['custom_fields'].extend(job_specific_fields.values())
+                else:
+                    candidate_details_data['custom_fields'] = list(job_specific_fields.values())
+
+            has_cv = False
+            gemini_resume_file = None
+            resume_info = candidate_details_data.get('resume')
+            log.info(
+                "bulk.process_single_candidate.resume_check",
+                candidate_slug=slug,
+                has_resume_data=bool(resume_info),
+                resume_filename=resume_info.get('filename') if resume_info else None,
+                resume_url=resume_info.get('file_link') or resume_info.get('url') if resume_info else None
+            )
+            if resume_info:
+                gemini_resume_file = upload_resume_to_gemini(resume_info, client)
+                has_cv = True if gemini_resume_file else False
+                log.info(
+                    "bulk.process_single_candidate.resume_upload_result",
+                    candidate_slug=slug,
+                    upload_successful=bool(gemini_resume_file),
+                    has_cv_flag=has_cv
+                )
+
+            has_ai_interview = False
+            interview_data = None
+            if alpharun_job_id:
+                interview_id = fetch_candidate_interview_id(slug, job_slug)
+                if interview_id:
+                    interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+                    if interview_data:
+                        log.info(
+                            "bulk.process_single_candidate.ai_interview_fetched",
+                            candidate_slug=slug,
+                        )
+                        has_ai_interview = True
+                    else:
+                        log.warning(
+                            "bulk.process_single_candidate.ai_interview_fetch_failed",
+                            candidate_slug=slug,
+                        )
+
+            summary = generate_html_summary(
+                candidate_data=full_candidate_data,
+                job_data=job_data,
+                interview_data=interview_data,
+                additional_context="",
+                prompt_type=single_prompt,
+                quil_data=None,
+                gemini_resume_file=gemini_resume_file,
+                client=client
+            )
+
+            if summary:
+                result = {
+                    'status': 'success',
+                    'summary': summary,
+                    'has_cv': has_cv,
+                    'has_ai_interview': has_ai_interview
+                }
+            else:
+                raise Exception("AI failed to generate summary.")
+
+        except Exception as e:
+            log.error(
+                "bulk.process_single_candidate.error",
+                candidate_slug=slug,
+                job_id=job_id,
+                error=str(e),
+            )
+            result = {
+                'status': 'failed',
+                'error': str(e),
+                'has_cv': False,
+                'has_ai_interview': False
+            }
+
+        # Thread-safe update of job results
+        with job_lock:
+            BULK_JOBS[job_id]['results'][slug] = result
+            BULK_JOBS[job_id]['processed_count'] += 1
+            log.info("bulk.process_single_candidate.finished", job_id=job_id, candidate_slug=slug, progress=f"{BULK_JOBS[job_id]['processed_count']}/{BULK_JOBS[job_id]['total_candidates']}")
+
+def process_candidates_background(job_id, flask_app):
     """
     This function runs in a background thread to process candidates
-    without blocking the main request.
+    concurrently using a ThreadPoolExecutor.
     """
     log.info("bulk.process_candidates_background.started", job_id=job_id)
-    with app_context:
+    # The parent thread correctly uses its fresh app_context instance.
+    with flask_app.app_context():
         job_details = BULK_JOBS[job_id]
         job_slug = job_details['job_slug']
         single_prompt = job_details['single_prompt']
-        client = current_app.client
+
+        # Lock to ensure thread-safe updates to shared job state
+        job_lock = threading.Lock()
 
         try:
             job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True)
@@ -59,99 +165,20 @@ def process_candidates_background(job_id, app_context):
                     alpharun_job_id = field.get('value')
                     break
 
-            for slug in job_details['candidate_slugs']:
-                try:
-                    full_candidate_data = fetch_recruitcrm_candidate(slug)
-                    if not full_candidate_data:
-                        raise Exception("Could not fetch candidate data.")
-
-                    candidate_details_data = full_candidate_data.get('data', full_candidate_data)
-
-                    job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(slug, job_slug)
-                    if job_specific_fields:
-                        if 'custom_fields' in candidate_details_data:
-                            candidate_details_data['custom_fields'].extend(job_specific_fields.values())
-                        else:
-                            candidate_details_data['custom_fields'] = list(job_specific_fields.values())
-
-                    has_cv = False
-                    gemini_resume_file = None
-                    resume_info = candidate_details_data.get('resume')
-                    log.info(
-                        "bulk.process_candidates_background.resume_check",
-                        candidate_slug=slug,
-                        has_resume_data=bool(resume_info),
-                        resume_filename=resume_info.get('filename') if resume_info else None,
-                        resume_url=resume_info.get('file_link') or resume_info.get('url') if resume_info else None
+            # Parallelize processing using ThreadPoolExecutor
+            # Max 5 workers to be mindful of API rate limits
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = [
+                    executor.submit(
+                        process_single_candidate,
+                        slug, job_id, job_slug, single_prompt, alpharun_job_id, job_data, flask_app, job_lock
                     )
-                    if resume_info:
-                        gemini_resume_file = upload_resume_to_gemini(resume_info, client)
-                        has_cv = True if gemini_resume_file else False
-                        log.info(
-                            "bulk.process_candidates_background.resume_upload_result",
-                            candidate_slug=slug,
-                            upload_successful=bool(gemini_resume_file),
-                            has_cv_flag=has_cv
-                        )
+                    for slug in job_details['candidate_slugs']
+                ]
 
-
-                    has_ai_interview = False
-                    interview_data = None
-                    if alpharun_job_id:
-                        interview_id = fetch_candidate_interview_id(slug, job_slug)
-                        if interview_id:
-                            interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
-                            if interview_data:
-                                log.info(
-                                    "bulk.process_candidates_background.ai_interview_fetched",
-                                    candidate_slug=slug,
-                                )
-                                has_ai_interview = True
-                            else:
-                                log.warning(
-                                    "bulk.process_candidates_background.ai_interview_fetch_failed",
-                                    candidate_slug=slug,
-                                )
-                    else:
-                        log.info("bulk.process_candidates_background.no_ai_job_id")
-
-
-                    summary = generate_html_summary(
-                        candidate_data=full_candidate_data,
-                        job_data=job_data,
-                        interview_data=interview_data,
-                        additional_context="",
-                        prompt_type=single_prompt,
-                        quil_data=None,
-                        gemini_resume_file=gemini_resume_file,
-                        client=client
-                    )
-
-                    if summary:
-                        BULK_JOBS[job_id]['results'][slug] = {
-                            'status': 'success',
-                            'summary': summary,
-                            'has_cv': has_cv,
-                            'has_ai_interview': has_ai_interview
-                        }
-                    else:
-                        raise Exception("AI failed to generate summary.")
-
-                except Exception as e:
-                    log.error(
-                        "bulk.process_candidates_background.candidate_error",
-                        candidate_slug=slug,
-                        job_id=job_id,
-                        error=str(e),
-                    )
-                    BULK_JOBS[job_id]['results'][slug] = {
-                        'status': 'failed',
-                        'error': str(e),
-                        'has_cv': False,
-                        'has_ai_interview': False
-                    }
-
-                job_details['processed_count'] += 1
+                # Wait for all futures to complete (though they are running in a background thread anyway)
+                for future in futures:
+                    future.result()
 
             job_details['status'] = 'complete'
             log.info("bulk.process_candidates_background.completed", job_id=job_id)
@@ -263,7 +290,10 @@ def start_bulk_process_job():
         'error': None
     }
 
-    thread = threading.Thread(target=process_candidates_background, args=(job_id, current_app.app_context()))
+    # Pass the underlying Flask app object (current_app._get_current_object()) to worker threads.
+    # This allows workers to create their own app context cleanly and avoids race conditions on context tokens.
+    flask_app = current_app._get_current_object()
+    thread = threading.Thread(target=process_candidates_background, args=(job_id, flask_app))
     thread.daemon = True
     thread.start()
     log.info("bulk.start_bulk_process_job.thread_started", job_id=job_id)
