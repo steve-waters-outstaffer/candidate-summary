@@ -3,13 +3,14 @@ import {
     Box, Card, CardContent, TextField, Button, Typography, Alert, CircularProgress,
     FormControl, InputLabel, Select, MenuItem, FormGroup, FormControlLabel, Switch,
     Stepper, Step, StepLabel, Grid, Paper, Accordion, AccordionSummary, AccordionDetails,
-    Divider, List, ListItem, ListItemIcon, ListItemText, Collapse
+    Divider, List, ListItem, ListItemIcon, ListItemText, Collapse, Tooltip, IconButton
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import DescriptionIcon from '@mui/icons-material/Description';
 import MicIcon from '@mui/icons-material/Mic';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { debounce } from 'lodash';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -28,6 +29,7 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
     
     // Email generation state
     const [generateEmail, setGenerateEmail] = useState(false);
+    const [copiedSlug, setCopiedSlug] = useState(null);
     const [creatingDraft, setCreatingDraft] = useState(false);
     const [draftUrl, setDraftUrl] = useState('');
 
@@ -332,6 +334,18 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
         showAlert('info', 'Sending all successful summaries to RecruitCRM...');
     };
 
+    const handleCopy = async (slug, content) => {
+        if (!content) return;
+        try {
+            await navigator.clipboard.writeText(content);
+            setCopiedSlug(slug);
+            setTimeout(() => setCopiedSlug(null), 2000);
+            showAlert('success', 'Summary copied to clipboard!');
+        } catch (err) {
+            showAlert('error', 'Failed to copy summary: ' + err.message);
+        }
+    };
+
     const getCandidateName = (slug) => {
         const candidate = candidateList.find(c => c.slug === slug);
         return candidate ? candidate.name : slug;
@@ -512,9 +526,21 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
                                             {result.status === 'success' && (
                                                 <Box>
                                                     <Box dangerouslySetInnerHTML={{ __html: result.summary }} />
-                                                    <Button variant="outlined" color="primary" size="small" onClick={() => handleSendToRecruitCRM(slug)} sx={{ mt: 2 }}>
-                                                        Send to RecruitCRM
-                                                    </Button>
+                                                    <Box sx={{ mt: 2, display: 'flex', gap: 1, alignItems: 'center' }}>
+                                                        <Tooltip title={copiedSlug === slug ? "Copied!" : "Copy Summary HTML"}>
+                                                            <IconButton
+                                                                size="small"
+                                                                color={copiedSlug === slug ? "success" : "primary"}
+                                                                onClick={(e) => { e.stopPropagation(); handleCopy(slug, result.summary); }}
+                                                                aria-label={`Copy summary for ${getCandidateName(slug)}`}
+                                                            >
+                                                                <ContentCopyIcon fontSize="small" />
+                                                            </IconButton>
+                                                        </Tooltip>
+                                                        <Button variant="outlined" color="primary" size="small" onClick={() => handleSendToRecruitCRM(slug)}>
+                                                            Send to RecruitCRM
+                                                        </Button>
+                                                    </Box>
                                                 </Box>
                                             )}
                                             {result.status === 'failed' && <Alert severity="error">{result.error}</Alert>}
