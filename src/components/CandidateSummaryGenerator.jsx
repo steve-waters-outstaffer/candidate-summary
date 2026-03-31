@@ -19,7 +19,9 @@ import {
     FormControl,
     InputLabel,
     Select,
-    MenuItem
+    MenuItem,
+    Tooltip,
+    IconButton
 } from '@mui/material';
 import {
     CheckCircle,
@@ -27,7 +29,8 @@ import {
     HelpOutline,
     Refresh,
     ThumbUp,
-    ThumbDown
+    ThumbDown,
+    ContentCopy
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -81,6 +84,7 @@ const CandidateSummaryGenerator = () => {
     const [pushing, setPushing] = useState(false);
     const [alert, setAlert] = useState({ show: false, type: 'info', message: '' });
     const [view, setView] = useState('preview');
+    const [copied, setCopied] = useState(false);
 
 
     const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
@@ -456,6 +460,18 @@ const CandidateSummaryGenerator = () => {
         setView(newValue);
     };
 
+    const copyToClipboard = async () => {
+        if (!generatedHtml) return;
+        try {
+            await navigator.clipboard.writeText(generatedHtml);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+            showAlert('success', 'Summary HTML copied to clipboard!');
+        } catch (err) {
+            showAlert('error', 'Failed to copy text: ' + err.message);
+        }
+    };
+
     // Only block generation if the core data (candidate + job) isn't confirmed
     const isGenerateDisabled = loading ||
         !(apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success');
@@ -583,7 +599,16 @@ const CandidateSummaryGenerator = () => {
                                     <Typography variant="h4">
                                         Candidate Ai Summary
                                     </Typography>
-                                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <Tooltip title={copied ? "Copied!" : "Copy HTML to Clipboard"}>
+                                            <IconButton
+                                                onClick={copyToClipboard}
+                                                color={copied ? "success" : "primary"}
+                                                aria-label="Copy summary HTML"
+                                            >
+                                                <ContentCopy />
+                                            </IconButton>
+                                        </Tooltip>
                                         <Button variant="contained" color="success" onClick={pushToRecruitCRM} disabled={pushing}>
                                             {pushing ? <CircularProgress size={24} /> : 'Push to RecruitCRM'}
                                         </Button>
