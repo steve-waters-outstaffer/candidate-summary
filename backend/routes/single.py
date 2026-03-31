@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, current_app
 import structlog
 import requests
 import analytics
+from concurrent.futures import ThreadPoolExecutor
 
 # --- Start Debugging Imports ---
 log = structlog.get_logger()
@@ -269,6 +270,7 @@ def generate_summary():
         job_slug = data.get('job_slug')
         additional_context = data.get('additional_context', '')
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
+        use_quil = data.get('use_quil', False)
         client = current_app.client
 
         # Model name can be overridden via config (Firestore-driven, no redeploy needed)
@@ -278,15 +280,24 @@ def generate_summary():
         if not all([candidate_slug, job_slug]):
             return jsonify({'error': 'Missing required RecruitCRM fields'}), 400
 
-        candidate_data = fetch_recruitcrm_candidate(candidate_slug)
-        job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True) # Ensure custom fields are included
+        # --- OPTIMIZATION: Parallel Data Fetching ---
+        log.info("single.generate_summary.parallel_fetch_started", candidate_slug=candidate_slug, job_slug=job_slug)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            future_candidate = executor.submit(fetch_recruitcrm_candidate, candidate_slug)
+            future_job = executor.submit(fetch_recruitcrm_job, job_slug, include_custom_fields=True)
+            future_job_specific = executor.submit(fetch_recruitcrm_candidate_job_specific_fields, candidate_slug, job_slug)
+            future_notes = executor.submit(fetch_candidate_notes, candidate_slug) if use_quil else None
+
+            candidate_data = future_candidate.result()
+            job_data = future_job.result()
+            job_specific_fields = future_job_specific.result()
+            candidate_notes = future_notes.result() if future_notes else []
 
         if not candidate_data or not job_data:
             missing = [name for name, d in [("candidate", candidate_data), ("job", job_data)] if not d]
             return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}'}), 500
 
         # Combine candidate's general custom fields with job-specific ones
-        job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug)
         if candidate_data and job_specific_fields:
             candidate_details = candidate_data.get('data', candidate_data)
             if 'custom_fields' in candidate_details:
@@ -307,7 +318,8 @@ def generate_summary():
 
         # 2. If we have an Alpharun Job ID, fetch the interview using the new fallback logic
         if alpharun_job_id:
-            interview_id = fetch_candidate_interview_id(candidate_slug, job_slug)
+            # OPTIMIZED: Pass pre-fetched data to avoid redundant API calls
+            interview_id = fetch_candidate_interview_id(candidate_slug, job_slug, candidate_data=candidate_data, job_specific_fields=job_specific_fields)
             if interview_id:
                 interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
         # --- END AI INTERVIEW LOGIC ---
@@ -321,13 +333,12 @@ def generate_summary():
 
         # --- QUIL INTERVIEW LOGIC ---
         quil_data = None
-        use_quil = data.get('use_quil', False)
         if use_quil and candidate_slug and job_slug:
             log.info("single.generate_summary.fetching_quil", 
                      candidate_slug=candidate_slug, 
                      job_slug=job_slug)
             try:
-                candidate_notes = fetch_candidate_notes(candidate_slug)
+                # OPTIMIZED: Use pre-fetched notes
                 job_title = job_details.get('name', 'Unknown Job')
                 job_description = job_details.get('description', '')
                 
