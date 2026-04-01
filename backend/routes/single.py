@@ -232,9 +232,10 @@ def test_quil():
             return jsonify({'error': 'Quil notes found but matching failed'}), 500
             
     except Exception as e:
+        # CRITICAL: We log the full error with exc_info on the server,
+        # but we do NOT return the traceback to the client to prevent info leakage.
         log.error("single.test_quil.error", error=str(e), exc_info=True)
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': 'An internal error occurred while testing Quil integration'}), 500
 
 @single_bp.route('/test-resume', methods=['POST'])
 def test_resume():
