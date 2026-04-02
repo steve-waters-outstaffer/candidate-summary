@@ -34,7 +34,7 @@ def list_prompts():
         return jsonify({'success': True, 'prompts': prompts}), 200
     except Exception as e:
         log.error("admin.list_prompts.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Failed to list prompts.'}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['GET'])
 @require_auth
@@ -50,7 +50,7 @@ def get_prompt(prompt_id):
         return jsonify({'success': True, 'prompt': prompt}), 200
     except Exception as e:
         log.error("admin.get_prompt.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Failed to get prompt.'}), 500
 
 @admin_bp.route('/api/admin/prompts', methods=['POST'])
 @require_auth
@@ -84,7 +84,7 @@ def create_prompt():
         return jsonify({'success': True, 'prompt_id': slug}), 201
     except Exception as e:
         log.error("admin.create_prompt.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Failed to create prompt.'}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['PUT'])
 @require_auth
@@ -112,7 +112,7 @@ def update_prompt(prompt_id):
         return jsonify({'success': True}), 200
     except Exception as e:
         log.error("admin.update_prompt.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Failed to update prompt.'}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['DELETE'])
 @require_auth
@@ -130,7 +130,7 @@ def delete_prompt(prompt_id):
         return jsonify({'success': True}), 200
     except Exception as e:
         log.error("admin.delete_prompt.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Failed to delete prompt.'}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>/set-default', methods=['POST'])
 @require_auth
@@ -151,7 +151,7 @@ def set_default_prompt(prompt_id):
         return jsonify({'success': True}), 200
     except Exception as e:
         log.error("admin.set_default.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Failed to set default prompt.'}), 500
 
 
 
@@ -191,7 +191,7 @@ def get_webhook_config():
 
     except Exception as e:
         log.error("admin.get_webhook_config.error", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to get webhook configuration.'}), 500
 
 
 @admin_bp.route('/api/webhook-config', methods=['PUT'])
@@ -230,7 +230,7 @@ def update_webhook_config():
 
     except Exception as e:
         log.error("admin.update_webhook_config.error", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to update webhook configuration.'}), 500
 
 
 
@@ -274,4 +274,4 @@ def get_summary_runs():
 
     except Exception as e:
         log.error("admin.get_summary_runs.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Failed to get summary runs.'}), 500
