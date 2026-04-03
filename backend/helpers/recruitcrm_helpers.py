@@ -1,10 +1,17 @@
 # helpers/recruitcrm_helpers.py
 import os
 import requests
+from requests.adapters import HTTPAdapter
 import structlog
 import datetime
 
 log = structlog.get_logger()
+
+# Configure session with connection pooling for performance (Bolt optimization)
+session = requests.Session()
+adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
 
 RECRUITCRM_API_KEY = os.getenv('RECRUITCRM_API_KEY')
 ALPHARUN_API_KEY = os.getenv('ALPHARUN_API_KEY')
@@ -36,7 +43,7 @@ def fetch_recruitcrm_candidate(slug):
     log.info("recruitcrm.fetch_recruitcrm_candidate.called", slug=slug)
     url = f'https://api.recruitcrm.io/v1/candidates/{slug}'
     try:
-        response = requests.get(url, headers=get_recruitcrm_headers())
+        response = session.get(url, headers=get_recruitcrm_headers())
         response.raise_for_status()
         log.info("recruitcrm.fetch_recruitcrm_candidate.success", slug=slug)
         return response.json()
@@ -49,7 +56,7 @@ def fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug):
     log.info("recruitcrm.fetch_recruitcrm_candidate_job_specific_fields.called", candidate_slug=candidate_slug, job_slug=job_slug)
     url = f"https://api.recruitcrm.io/v1/candidates/associated-field/{candidate_slug}/{job_slug}"
     try:
-        response = requests.get(url, headers=get_recruitcrm_headers())
+        response = session.get(url, headers=get_recruitcrm_headers())
         if response.status_code == 200:
             log.info("recruitcrm.fetch_job_specific_fields.success", candidate_slug=candidate_slug, job_slug=job_slug)
             return response.json().get('data', {})
@@ -65,11 +72,17 @@ def fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug):
         log.error("recruitcrm.fetch_job_specific_fields.exception", error=str(e), candidate_slug=candidate_slug, job_slug=job_slug)
         return None
 
-def fetch_candidate_interview_id(candidate_slug, job_slug=None):
-    """Fetches the AI Interview ID for a candidate, checking job-specific fields first."""
+def fetch_candidate_interview_id(candidate_slug, job_slug=None, candidate_data=None, job_specific_fields=None):
+    """
+    Fetches the AI Interview ID for a candidate, checking job-specific fields first.
+    Performance optimization: accepts optional pre-fetched data to avoid redundant API calls.
+    """
     log.info("recruitcrm.fetch_candidate_interview_id.called", candidate_slug=candidate_slug, job_slug=job_slug)
+
     if job_slug:
-        job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug)
+        if job_specific_fields is None:
+            job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug)
+
         if job_specific_fields:
             for field_data in job_specific_fields.values():
                 if isinstance(field_data, dict) and field_data.get('label') == 'AI Interview ID':
@@ -78,7 +91,9 @@ def fetch_candidate_interview_id(candidate_slug, job_slug=None):
                         log.info("recruitcrm.fetch_candidate_interview_id.found_in_job_specific_fields", candidate_slug=candidate_slug, job_slug=job_slug)
                         return interview_id
 
-    candidate_data = fetch_recruitcrm_candidate(candidate_slug)
+    if candidate_data is None:
+        candidate_data = fetch_recruitcrm_candidate(candidate_slug)
+
     if candidate_data:
         custom_fields = candidate_data.get('data', {}).get('custom_fields', [])
         for field in custom_fields:
@@ -96,7 +111,7 @@ def fetch_recruitcrm_job(slug, include_custom_fields=True):
     url = f'https://api.recruitcrm.io/v1/jobs/{slug}'
     params = {'include': 'custom_fields'} if include_custom_fields else None
     try:
-        response = requests.get(url, headers=get_recruitcrm_headers(), params=params)
+        response = session.get(url, headers=get_recruitcrm_headers(), params=params)
         response.raise_for_status()
         log.info("recruitcrm.fetch_recruitcrm_job.success", slug=slug)
         return response.json()
@@ -109,7 +124,7 @@ def fetch_hiring_pipeline():
     log.info("recruitcrm.fetch_hiring_pipeline.called")
     url = "https://api.recruitcrm.io/v1/hiring-pipeline"
     try:
-        response = requests.get(url, headers=get_recruitcrm_headers())
+        response = session.get(url, headers=get_recruitcrm_headers())
         response.raise_for_status()
         log.info("recruitcrm.fetch_hiring_pipeline.success")
         return response.json()
@@ -123,7 +138,7 @@ def push_to_recruitcrm_internal(candidate_slug, html_summary):
     try:
         url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
         files = {'candidate_summary': (None, html_summary)}
-        response = requests.post(url, files=files, headers=get_recruitcrm_headers())
+        response = session.post(url, files=files, headers=get_recruitcrm_headers())
         log.info("recruitcrm.push_to_recruitcrm_internal.response", candidate_slug=candidate_slug, status_code=response.status_code)
         return response.status_code == 200
     except Exception as e:
@@ -136,7 +151,7 @@ def fetch_recruitcrm_assigned_candidates(job_slug, status_id=None):
     url = f"https://api.recruitcrm.io/v1/jobs/{job_slug}/assigned-candidates"
     params = {'status_id': status_id} if status_id else {}
     try:
-        response = requests.get(url, headers=get_recruitcrm_headers(), params=params)
+        response = session.get(url, headers=get_recruitcrm_headers(), params=params)
         response.raise_for_status()
         data = response.json().get('data', [])
         log.info("recruitcrm.fetch_recruitcrm_assigned_candidates.success", job_slug=job_slug, status_id=status_id, count=len(data))
@@ -150,7 +165,7 @@ def fetch_alpharun_interview(job_opening_id, interview_id):
     log.info("recruitcrm.fetch_alpharun_interview.called", job_opening_id=job_opening_id, interview_id=interview_id)
     url = f"https://api.alpharun.com/api/v1/job-openings/{job_opening_id}/interviews/{interview_id}"
     try:
-        response = requests.get(url, headers=get_alpharun_headers())
+        response = session.get(url, headers=get_alpharun_headers())
         response.raise_for_status()
         log.info("recruitcrm.fetch_alpharun_interview.success", job_opening_id=job_opening_id, interview_id=interview_id)
         return response.json()
@@ -168,7 +183,7 @@ def fetch_candidate_notes(candidate_slug):
 
     }
     try:
-        response = requests.get(url, headers=get_recruitcrm_headers(), params=params)
+        response = session.get(url, headers=get_recruitcrm_headers(), params=params)
         response.raise_for_status()
         data = response.json()
         
@@ -211,7 +226,7 @@ def create_recruitcrm_note(candidate_slug, job_slug, note_content):
     # --- END OF UPDATED PAYLOAD ---
 
     try:
-        response = requests.post(url, headers=get_recruitcrm_headers(), json=payload)
+        response = session.post(url, headers=get_recruitcrm_headers(), json=payload)
         response.raise_for_status()
         log.info("recruitcrm.create_recruitcrm_note.success",
                  candidate_slug=candidate_slug)
@@ -244,7 +259,7 @@ def set_candidate_stage_by_slug(candidate_slug, job_slug, new_status_id):
     }
 
     try:
-        response = requests.post(url, headers=get_recruitcrm_headers(), json=payload)
+        response = session.post(url, headers=get_recruitcrm_headers(), json=payload)
         response.raise_for_status()
         data = response.json()
         log.info("recruitcrm.set_candidate_stage.success",
