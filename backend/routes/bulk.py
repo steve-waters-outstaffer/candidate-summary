@@ -79,7 +79,13 @@ def process_single_candidate(slug, job_id, job_slug, single_prompt, alpharun_job
             has_ai_interview = False
             interview_data = None
             if alpharun_job_id:
-                interview_id = fetch_candidate_interview_id(slug, job_slug)
+                # PERFORMANCE OPTIMIZATION: Pass pre-fetched data to avoid redundant API calls
+                interview_id = fetch_candidate_interview_id(
+                    slug,
+                    job_slug,
+                    candidate_data=full_candidate_data,
+                    job_specific_fields=job_specific_fields
+                )
                 if interview_id:
                     interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                     if interview_data:
