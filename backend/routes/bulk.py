@@ -388,7 +388,7 @@ def generate_bulk_email():
 
     except Exception as e:
         log.error("bulk.generate_bulk_email.error", job_id=job_id, error=str(e))
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An internal server error occurred while generating the bulk email'}), 500
 
 @bulk_bp.route('/create-bulk-gmail-draft', methods=['POST'])
 def create_bulk_gmail_draft():
@@ -429,4 +429,4 @@ def create_bulk_gmail_draft():
             
     except Exception as e:
         log.error("bulk.create_bulk_gmail_draft.exception", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An internal server error occurred while creating the bulk Gmail draft'}), 500
