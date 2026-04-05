@@ -233,8 +233,7 @@ def test_quil():
             
     except Exception as e:
         log.error("single.test_quil.error", error=str(e), exc_info=True)
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': 'An internal error occurred during Quil testing'}), 500
 
 @single_bp.route('/test-resume', methods=['POST'])
 def test_resume():
@@ -397,8 +396,8 @@ def generate_summary():
             return jsonify({'error': 'Failed to generate summary from AI model'}), 500
 
     except Exception as e:
-        log.error("single.generate_summary.error", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("single.generate_summary.error", error=str(e), exc_info=True)
+        return jsonify({'error': 'Failed to generate summary'}), 500
 
 @single_bp.route('/push-to-recruitcrm', methods=['POST'])
 def push_to_recruitcrm():
@@ -429,12 +428,12 @@ def push_to_recruitcrm():
             log.info("single.push_to_recruitcrm.success")
             return jsonify({'success': True, 'message': 'Summary pushed to RecruitCRM successfully'})
         else:
-            log.error("single.push_to_recruitcrm.failed", status=response.status_code)
-            return jsonify({'error': f'Failed to update RecruitCRM: {response.text}'}), 500
+            log.error("single.push_to_recruitcrm.failed", status=response.status_code, response_body=response.text)
+            return jsonify({'error': 'Failed to update RecruitCRM'}), 500
 
     except Exception as e:
-        log.error("single.push_to_recruitcrm.exception", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("single.push_to_recruitcrm.exception", error=str(e), exc_info=True)
+        return jsonify({'error': 'An error occurred while pushing to RecruitCRM'}), 500
 
 
 # --- NEW SIMPLIFIED ROUTE ---
@@ -467,7 +466,7 @@ def create_note():
 
     except Exception as e:
         log.error("single.create_note.exception", error=str(e), exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to create note in RecruitCRM'}), 500
 # --- END OF NEW ROUTE ---
 
 # --- ADD THIS NEW ROUTE ---
@@ -508,7 +507,7 @@ def move_stage():
 
     except Exception as e:
         log.error("single.move_stage.exception", error=str(e), exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to update candidate stage'}), 500
 
 
 @single_bp.route('/create-gmail-draft', methods=['POST'])
@@ -555,8 +554,8 @@ def create_gmail_draft_route():
             return jsonify({'error': result.get('error', 'Failed to create Gmail draft')}), 500
             
     except Exception as e:
-        log.error("single.create_gmail_draft.exception", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("single.create_gmail_draft.exception", error=str(e), exc_info=True)
+        return jsonify({'error': 'Failed to create Gmail draft'}), 500
 
 @single_bp.route('/log-feedback', methods=['POST'])
 def log_feedback():
@@ -580,8 +579,8 @@ def log_feedback():
         feedback_ref.set(feedback_data)
         return jsonify({'success': True, 'message': 'Feedback logged successfully'}), 200
     except Exception as e:
-        log.error("single.log_feedback.error", error=str(e))
-        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+        log.error("single.log_feedback.error", error=str(e), exc_info=True)
+        return jsonify({'error': 'Failed to log feedback'}), 500
 
 
 # --- ADD THIS NEW ROUTE ---
@@ -630,5 +629,5 @@ def track_event():
                   event_name=event_name,
                   user_id=user_id,
                   exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to track event'}), 500
 # --- END OF NEW ROUTE ---
