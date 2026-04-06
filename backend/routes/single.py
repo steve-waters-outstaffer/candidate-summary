@@ -233,8 +233,7 @@ def test_quil():
             
     except Exception as e:
         log.error("single.test_quil.error", error=str(e), exc_info=True)
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': 'An error occurred while testing Quil matching'}), 500
 
 @single_bp.route('/test-resume', methods=['POST'])
 def test_resume():
