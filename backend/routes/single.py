@@ -26,7 +26,8 @@ try:
         fetch_candidate_interview_id,
         fetch_candidate_notes,
         create_recruitcrm_note,
-        set_candidate_stage_by_slug
+        set_candidate_stage_by_slug,
+        push_to_recruitcrm_internal
     )
     log.info("routes.single: Successfully imported from helpers.recruitcrm_helpers.")
 
@@ -307,7 +308,13 @@ def generate_summary():
 
         # 2. If we have an Alpharun Job ID, fetch the interview using the new fallback logic
         if alpharun_job_id:
-            interview_id = fetch_candidate_interview_id(candidate_slug, job_slug)
+            # Pass pre-fetched data to avoid redundant API calls
+            interview_id = fetch_candidate_interview_id(
+                candidate_slug,
+                job_slug,
+                candidate_data=candidate_data,
+                job_specific_fields=job_specific_fields
+            )
             if interview_id:
                 interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
         # --- END AI INTERVIEW LOGIC ---
@@ -418,19 +425,15 @@ def push_to_recruitcrm():
             log.error("single.push_to_recruitcrm.missing_data")
             return jsonify({'error': 'Missing candidate slug or HTML summary'}), 400
 
-        url = f"https://api.recruitcrm.io/v1/candidates/{candidate_slug}"
-        files = {'candidate_summary': (None, html_summary)}
-        log.info("single.push_to_recruitcrm.request.sent", url=url)
+        # Use the helper function which now utilizes connection pooling
+        success = push_to_recruitcrm_internal(candidate_slug, html_summary)
 
-        response = requests.post(url, files=files, headers=get_recruitcrm_headers())
-        log.info("single.push_to_recruitcrm.response", status=response.status_code)
-
-        if response.status_code == 200:
+        if success:
             log.info("single.push_to_recruitcrm.success")
             return jsonify({'success': True, 'message': 'Summary pushed to RecruitCRM successfully'})
         else:
-            log.error("single.push_to_recruitcrm.failed", status=response.status_code)
-            return jsonify({'error': f'Failed to update RecruitCRM: {response.text}'}), 500
+            log.error("single.push_to_recruitcrm.failed")
+            return jsonify({'error': 'Failed to update RecruitCRM'}), 500
 
     except Exception as e:
         log.error("single.push_to_recruitcrm.exception", error=str(e))

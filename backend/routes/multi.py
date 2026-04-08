@@ -97,7 +97,13 @@ def generate_multiple_candidates():
 
             interview_data = None
             if alpharun_job_id:
-                interview_id = fetch_candidate_interview_id(slug)
+                # Pass pre-fetched data to avoid redundant API calls
+                interview_id = fetch_candidate_interview_id(
+                    slug,
+                    job_slug,
+                    candidate_data={'data': candidate_details},
+                    job_specific_fields=job_specific_fields
+                )
                 if interview_id:
                     interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                 else:
@@ -209,7 +215,13 @@ def process_curated_candidates():
 
                     interview_data = None
                     if alpharun_job_id:
-                        interview_id = fetch_candidate_interview_id(slug)
+                        # Pass pre-fetched data to avoid redundant API calls
+                        interview_id = fetch_candidate_interview_id(
+                            slug,
+                            job_slug,
+                            candidate_data=full_candidate_data,
+                            job_specific_fields=job_specific_fields
+                        )
                         if interview_id:
                             interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
 
