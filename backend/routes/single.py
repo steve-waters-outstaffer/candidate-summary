@@ -233,8 +233,7 @@ def test_quil():
             
     except Exception as e:
         log.error("single.test_quil.error", error=str(e), exc_info=True)
-        import traceback
-        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+        return jsonify({'error': 'An unexpected error occurred while testing Quil matching'}), 500
 
 @single_bp.route('/test-resume', methods=['POST'])
 def test_resume():
@@ -398,7 +397,7 @@ def generate_summary():
 
     except Exception as e:
         log.error("single.generate_summary.error", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An error occurred while generating the summary'}), 500
 
 @single_bp.route('/push-to-recruitcrm', methods=['POST'])
 def push_to_recruitcrm():
@@ -434,7 +433,7 @@ def push_to_recruitcrm():
 
     except Exception as e:
         log.error("single.push_to_recruitcrm.exception", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An error occurred while pushing to RecruitCRM'}), 500
 
 
 # --- NEW SIMPLIFIED ROUTE ---
@@ -467,7 +466,7 @@ def create_note():
 
     except Exception as e:
         log.error("single.create_note.exception", error=str(e), exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An error occurred while creating the note'}), 500
 # --- END OF NEW ROUTE ---
 
 # --- ADD THIS NEW ROUTE ---
@@ -508,7 +507,7 @@ def move_stage():
 
     except Exception as e:
         log.error("single.move_stage.exception", error=str(e), exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An error occurred while moving the candidate stage'}), 500
 
 
 @single_bp.route('/create-gmail-draft', methods=['POST'])
@@ -556,7 +555,7 @@ def create_gmail_draft_route():
             
     except Exception as e:
         log.error("single.create_gmail_draft.exception", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An error occurred while creating the Gmail draft'}), 500
 
 @single_bp.route('/log-feedback', methods=['POST'])
 def log_feedback():
@@ -581,7 +580,7 @@ def log_feedback():
         return jsonify({'success': True, 'message': 'Feedback logged successfully'}), 200
     except Exception as e:
         log.error("single.log_feedback.error", error=str(e))
-        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+        return jsonify({'error': 'An error occurred while logging feedback'}), 500
 
 
 # --- ADD THIS NEW ROUTE ---
@@ -630,5 +629,5 @@ def track_event():
                   event_name=event_name,
                   user_id=user_id,
                   exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An error occurred while tracking the event'}), 500
 # --- END OF NEW ROUTE ---
