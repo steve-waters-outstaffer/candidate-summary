@@ -147,8 +147,8 @@ def generate_multiple_candidates():
         return jsonify({'success': True, 'generated_content': final_content}), 200
 
     except Exception as e:
-        log.error("multi.generate_multiple_candidates.error", error=str(e))
-        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
+        log.error("multi.generate_multiple_candidates.error", error=str(e), exc_info=True)
+        return jsonify({'error': 'An error occurred while generating multiple candidate content'}), 500
 
 @multi_bp.route('/process-curated-candidates', methods=['POST'])
 def process_curated_candidates():
@@ -267,5 +267,5 @@ def process_curated_candidates():
         return jsonify(final_response), 200
 
     except Exception as e:
-        log.error("multi.process_curated_candidates.error", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("multi.process_curated_candidates.error", error=str(e), exc_info=True)
+        return jsonify({'error': 'An error occurred while processing curated candidates'}), 500

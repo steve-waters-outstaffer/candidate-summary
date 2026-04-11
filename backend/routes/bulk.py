@@ -387,8 +387,8 @@ def generate_bulk_email():
             raise Exception("AI model failed to generate email content.")
 
     except Exception as e:
-        log.error("bulk.generate_bulk_email.error", job_id=job_id, error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("bulk.generate_bulk_email.error", job_id=job_id, error=str(e), exc_info=True)
+        return jsonify({'error': 'Failed to generate bulk email'}), 500
 
 @bulk_bp.route('/create-bulk-gmail-draft', methods=['POST'])
 def create_bulk_gmail_draft():
@@ -428,5 +428,5 @@ def create_bulk_gmail_draft():
             return jsonify({'error': result.get('error', 'Failed to create Gmail draft')}), 500
             
     except Exception as e:
-        log.error("bulk.create_bulk_gmail_draft.exception", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("bulk.create_bulk_gmail_draft.exception", error=str(e), exc_info=True)
+        return jsonify({'error': 'Failed to create bulk Gmail draft'}), 500

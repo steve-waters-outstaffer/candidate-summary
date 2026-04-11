@@ -1,0 +1,4 @@
+## 2025-04-11 - Information Exposure and Missing Auth Implementation
+**Vulnerability:** API endpoints were leaking internal stack traces and raw exception strings in error responses. Additionally, a critical authentication decorator (`require_auth`) was imported but missing from the codebase.
+**Learning:** Development-time debugging practices (like returning `traceback.format_exc()`) were left in production-ready routes, creating a significant information disclosure risk. The missing `auth_helpers.py` caused the admin blueprint to fail on import, which could have been missed if that route wasn't explicitly exercised in a test suite.
+**Prevention:** Standardize a secure error-handling pattern using `structlog` with `exc_info=True` for server-side logging while returning generic, non-descriptive messages to the client. Ensure core security components like authentication helpers are part of the baseline repository and verified through automated import checks.
