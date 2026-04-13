@@ -121,10 +121,11 @@ def process_single_candidate(slug, job_id, job_slug, single_prompt, alpharun_job
                 candidate_slug=slug,
                 job_id=job_id,
                 error=str(e),
+                exc_info=True
             )
             result = {
                 'status': 'failed',
-                'error': str(e),
+                'error': 'Internal error during candidate processing',
                 'has_cv': False,
                 'has_ai_interview': False
             }
@@ -188,9 +189,10 @@ def process_candidates_background(job_id, flask_app):
                 "bulk.process_candidates_background.fatal_error",
                 job_id=job_id,
                 error=str(e),
+                exc_info=True
             )
             job_details['status'] = 'failed'
-            job_details['error'] = str(e)
+            job_details['error'] = 'A fatal internal error occurred during background processing'
 
 @bulk_bp.route('/job-stages-with-counts/<job_slug>', methods=['GET'])
 def get_job_stages_with_counts(job_slug):
@@ -387,8 +389,8 @@ def generate_bulk_email():
             raise Exception("AI model failed to generate email content.")
 
     except Exception as e:
-        log.error("bulk.generate_bulk_email.error", job_id=job_id, error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("bulk.generate_bulk_email.error", job_id=job_id, error=str(e), exc_info=True)
+        return jsonify({'error': 'An internal error occurred while generating bulk email'}), 500
 
 @bulk_bp.route('/create-bulk-gmail-draft', methods=['POST'])
 def create_bulk_gmail_draft():
@@ -428,5 +430,5 @@ def create_bulk_gmail_draft():
             return jsonify({'error': result.get('error', 'Failed to create Gmail draft')}), 500
             
     except Exception as e:
-        log.error("bulk.create_bulk_gmail_draft.exception", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("bulk.create_bulk_gmail_draft.exception", error=str(e), exc_info=True)
+        return jsonify({'error': 'An internal error occurred while creating bulk Gmail draft'}), 500

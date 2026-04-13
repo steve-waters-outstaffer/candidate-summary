@@ -13,7 +13,7 @@ try:
     from helpers.pdf_helpers import generate_pdf_from_html
     log.info("routes.floating: All imports successful.")
 except Exception as e:
-    log.error("routes.floating: FAILED during import", error=str(e), exc_info=True)
+    log.error("routes.floating.import_failed", error=str(e), exc_info=True)
     import sys
     sys.exit(1)
 
