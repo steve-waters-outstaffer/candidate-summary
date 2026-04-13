@@ -2,6 +2,8 @@
 
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify, current_app
 import structlog
 from config.prompts import build_full_prompt
@@ -23,6 +25,54 @@ log = structlog.get_logger()
 
 multi_bp = Blueprint('multi_api', __name__)
 
+def gather_candidate_data_task(slug, index, job_slug, alpharun_job_id, candidate_map, flask_app, results, results_lock):
+    """Worker task to gather data for a single candidate concurrently."""
+    with flask_app.app_context():
+        client = current_app.client
+        candidate_details = candidate_map.get(slug)
+        if not candidate_details:
+            log.warning("multi.gather_candidate_data.candidate_not_found", candidate_slug=slug)
+            return
+
+        try:
+            # Fetch job-specific custom fields
+            job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(slug, job_slug)
+            if job_specific_fields:
+                # Use a copy to avoid mutating shared candidate_map entry if multiple threads access same candidate
+                candidate_details = candidate_details.copy()
+                if 'custom_fields' in candidate_details:
+                    candidate_details['custom_fields'] = candidate_details['custom_fields'] + list(job_specific_fields.values()) if isinstance(job_specific_fields, dict) else candidate_details['custom_fields'] + job_specific_fields
+                else:
+                    candidate_details['custom_fields'] = list(job_specific_fields.values()) if isinstance(job_specific_fields, dict) else job_specific_fields
+
+            # Upload resume to Gemini
+            gemini_resume_file = None
+            resume_info = candidate_details.get('resume')
+            if resume_info:
+                gemini_resume_file = upload_resume_to_gemini(resume_info, client)
+
+            # Fetch interview data
+            interview_data = None
+            if alpharun_job_id:
+                interview_id = fetch_candidate_interview_id(slug, job_slug)
+                if interview_id:
+                    interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+                else:
+                    log.warning(
+                        "multi.gather_candidate_data.missing_ai_interview_id",
+                        candidate_slug=slug,
+                    )
+
+            with results_lock:
+                results[index] = {
+                    'basic_data': {'data': candidate_details},
+                    'resume_file': gemini_resume_file,
+                    'interview_data': interview_data,
+                    'candidate_number': index + 1
+                }
+        except Exception as e:
+            log.error("multi.gather_candidate_data.error", candidate_slug=slug, error=str(e))
+
 @multi_bp.route('/generate-multiple-candidates', methods=['POST'])
 def generate_multiple_candidates():
     """Generates content for multiple candidates."""
@@ -36,6 +86,7 @@ def generate_multiple_candidates():
         preferred_candidate = data.get('preferred_candidate', '')
         additional_context = data.get('additional_context', '')
         client = current_app.client
+        flask_app = current_app._get_current_object()
 
         if not candidate_slugs or not job_slug:
             return jsonify({'error': 'At least one candidate slug and a job slug are required'}), 400
@@ -58,60 +109,28 @@ def generate_multiple_candidates():
                 alpharun_job_id = field.get('value')
                 break
 
-        if not alpharun_job_id:
-            log.warning(
-                "multi.generate_multiple_candidates.missing_ai_job_id",
-                job_slug=job_slug,
-            )
-
         all_job_candidates = fetch_recruitcrm_assigned_candidates(job_slug)
         candidate_map = {c.get('candidate', {}).get('slug'): c.get('candidate', {}) for c in all_job_candidates}
 
-        candidates_data = []
-        failed_candidates = []
-        resume_files = []
+        # Initialize results list with placeholders to preserve order
+        candidates_data_results = [None] * len(candidate_slugs)
+        results_lock = threading.Lock()
 
-        for i, slug in enumerate(candidate_slugs):
-            candidate_details = candidate_map.get(slug)
-            if not candidate_details:
-                log.warning(
-                    "multi.generate_multiple_candidates.candidate_not_found",
-                    candidate_slug=slug,
+        # Parallelize data gathering
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [
+                executor.submit(
+                    gather_candidate_data_task,
+                    slug, i, job_slug, alpharun_job_id, candidate_map, flask_app, candidates_data_results, results_lock
                 )
-                failed_candidates.append(slug)
-                continue
+                for i, slug in enumerate(candidate_slugs)
+            ]
+            for future in futures:
+                future.result()
 
-            job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(slug, job_slug)
-            if job_specific_fields:
-                if 'custom_fields' in candidate_details:
-                    candidate_details['custom_fields'].extend(job_specific_fields)
-                else:
-                    candidate_details['custom_fields'] = job_specific_fields
-
-            gemini_resume_file = None
-            resume_info = candidate_details.get('resume')
-            if resume_info:
-                gemini_resume_file = upload_resume_to_gemini(resume_info, client)
-                if gemini_resume_file:
-                    resume_files.append(gemini_resume_file)
-
-            interview_data = None
-            if alpharun_job_id:
-                interview_id = fetch_candidate_interview_id(slug)
-                if interview_id:
-                    interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
-                else:
-                    log.warning(
-                        "multi.generate_multiple_candidates.missing_ai_interview_id",
-                        candidate_slug=slug,
-                    )
-
-            candidates_data.append({
-                'basic_data': {'data': candidate_details},
-                'resume_file': gemini_resume_file,
-                'interview_data': interview_data,
-                'candidate_number': i + 1
-            })
+        # Filter out None results (failed candidates)
+        candidates_data = [r for r in candidates_data_results if r is not None]
+        resume_files = [r['resume_file'] for r in candidates_data if r['resume_file'] is not None]
 
         if not candidates_data:
             return jsonify({'error': 'No valid candidate data could be retrieved'}), 400
@@ -150,6 +169,61 @@ def generate_multiple_candidates():
         log.error("multi.generate_multiple_candidates.error", error=str(e))
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
+def process_curated_candidate_task(slug, index, job_slug, job_data, alpharun_job_id, single_prompt, auto_push, generate_summaries, flask_app, summaries_results, failed_candidates, results_lock):
+    """Worker task to process a single curated candidate concurrently."""
+    with flask_app.app_context():
+        client = current_app.client
+        try:
+            full_candidate_data = fetch_recruitcrm_candidate(slug)
+            if not full_candidate_data:
+                with results_lock:
+                    failed_candidates[slug] = "Could not fetch candidate data."
+                return
+
+            job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(slug, job_slug)
+            if job_specific_fields:
+                if 'data' in full_candidate_data and 'custom_fields' in full_candidate_data['data']:
+                    full_candidate_data['data']['custom_fields'].extend(job_specific_fields.values() if isinstance(job_specific_fields, dict) else job_specific_fields)
+                else:
+                    full_candidate_data.setdefault('data', {})['custom_fields'] = list(job_specific_fields.values()) if isinstance(job_specific_fields, dict) else job_specific_fields
+
+            candidate_details = full_candidate_data.get('data', full_candidate_data)
+            name = f"{candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}".strip()
+
+            gemini_resume_file = None
+            if candidate_details.get('resume'):
+                gemini_resume_file = upload_resume_to_gemini(candidate_details.get('resume'), client)
+
+            interview_data = None
+            if alpharun_job_id:
+                interview_id = fetch_candidate_interview_id(slug, job_slug)
+                if interview_id:
+                    interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
+
+            summary = generate_html_summary(
+                candidate_data=full_candidate_data,
+                job_data=job_data,
+                interview_data=interview_data,
+                additional_context="",
+                prompt_type=single_prompt,
+                quil_data=None,
+                gemini_resume_file=gemini_resume_file,
+                client=client
+            )
+
+            if summary:
+                with results_lock:
+                    summaries_results[index] = {'name': name, 'slug': slug, 'html': summary}
+                if auto_push and generate_summaries:
+                    push_to_recruitcrm_internal(slug, summary)
+            else:
+                with results_lock:
+                    failed_candidates[name or slug] = "AI failed to generate summary."
+        except Exception as e:
+            log.error("multi.process_curated_candidate_task.error", candidate_slug=slug, error=str(e))
+            with results_lock:
+                failed_candidates[slug] = f"An unexpected error occurred: {e}"
+
 @multi_bp.route('/process-curated-candidates', methods=['POST'])
 def process_curated_candidates():
     """Processes a curated list of candidates for a specific job."""
@@ -163,14 +237,16 @@ def process_curated_candidates():
     generate_summaries = data.get('generate_summaries', False)
     generate_email = data.get('generate_email', True)
     client = current_app.client
+    flask_app = current_app._get_current_object()
 
     if not (generate_summaries or generate_email):
         return jsonify({'error': 'No action requested.'}), 400
     if not job_slug or not candidate_slugs:
         return jsonify({'error': 'job_slug and candidate_slugs are required.'}), 400
 
-    processed_summaries_list = []
+    summaries_results = [None] * len(candidate_slugs)
     failed_candidates = {}
+    results_lock = threading.Lock()
     email_html = None
 
     try:
@@ -186,53 +262,18 @@ def process_curated_candidates():
                 break
 
         if generate_summaries or generate_email:
-            for slug in candidate_slugs:
-                try:
-                    full_candidate_data = fetch_recruitcrm_candidate(slug)
-                    if not full_candidate_data:
-                        failed_candidates[slug] = "Could not fetch candidate data."
-                        continue
-
-                    job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(slug, job_slug)
-                    if job_specific_fields:
-                        if 'data' in full_candidate_data and 'custom_fields' in full_candidate_data['data']:
-                            full_candidate_data['data']['custom_fields'].extend(job_specific_fields)
-                        else:
-                            full_candidate_data.setdefault('data', {})['custom_fields'] = job_specific_fields
-
-                    candidate_details = full_candidate_data.get('data', full_candidate_data)
-                    name = f"{candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}".strip()
-
-                    gemini_resume_file = None
-                    if candidate_details.get('resume'):
-                        gemini_resume_file = upload_resume_to_gemini(candidate_details.get('resume'), client)
-
-                    interview_data = None
-                    if alpharun_job_id:
-                        interview_id = fetch_candidate_interview_id(slug)
-                        if interview_id:
-                            interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
-
-                    summary = generate_html_summary(
-                        candidate_data=full_candidate_data,
-                        job_data=job_data,
-                        interview_data=interview_data,
-                        additional_context="",
-                        prompt_type=single_prompt,
-                        fireflies_data=None,
-                        quil_data=None,
-                        gemini_resume_file=gemini_resume_file,
-                        client=client
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = [
+                    executor.submit(
+                        process_curated_candidate_task,
+                        slug, i, job_slug, job_data, alpharun_job_id, single_prompt, auto_push, generate_summaries, flask_app, summaries_results, failed_candidates, results_lock
                     )
+                    for i, slug in enumerate(candidate_slugs)
+                ]
+                for future in futures:
+                    future.result()
 
-                    if summary:
-                        processed_summaries_list.append({'name': name, 'slug': slug, 'html': summary})
-                        if auto_push and generate_summaries:
-                            push_to_recruitcrm_internal(slug, summary)
-                    else:
-                        failed_candidates[name or slug] = "AI failed to generate summary."
-                except Exception as e:
-                    failed_candidates[slug] = f"An unexpected error occurred: {e}"
+        processed_summaries_list = [r for r in summaries_results if r is not None]
 
         if generate_email and processed_summaries_list:
             try:
