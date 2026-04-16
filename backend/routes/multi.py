@@ -84,9 +84,9 @@ def generate_multiple_candidates():
             job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(slug, job_slug)
             if job_specific_fields:
                 if 'custom_fields' in candidate_details:
-                    candidate_details['custom_fields'].extend(job_specific_fields)
+                    candidate_details['custom_fields'].extend(job_specific_fields.values())
                 else:
-                    candidate_details['custom_fields'] = job_specific_fields
+                    candidate_details['custom_fields'] = list(job_specific_fields.values())
 
             gemini_resume_file = None
             resume_info = candidate_details.get('resume')
@@ -97,7 +97,13 @@ def generate_multiple_candidates():
 
             interview_data = None
             if alpharun_job_id:
-                interview_id = fetch_candidate_interview_id(slug)
+                # OPTIMIZATION: Pass pre-fetched data to avoid redundant API calls
+                interview_id = fetch_candidate_interview_id(
+                    slug,
+                    job_slug,
+                    candidate_data={'data': candidate_details},
+                    job_specific_fields=job_specific_fields
+                )
                 if interview_id:
                     interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
                 else:
@@ -195,10 +201,11 @@ def process_curated_candidates():
 
                     job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(slug, job_slug)
                     if job_specific_fields:
-                        if 'data' in full_candidate_data and 'custom_fields' in full_candidate_data['data']:
-                            full_candidate_data['data']['custom_fields'].extend(job_specific_fields)
+                        candidate_details = full_candidate_data.get('data', full_candidate_data)
+                        if 'custom_fields' in candidate_details:
+                            candidate_details['custom_fields'].extend(job_specific_fields.values())
                         else:
-                            full_candidate_data.setdefault('data', {})['custom_fields'] = job_specific_fields
+                            candidate_details['custom_fields'] = list(job_specific_fields.values())
 
                     candidate_details = full_candidate_data.get('data', full_candidate_data)
                     name = f"{candidate_details.get('first_name', '')} {candidate_details.get('last_name', '')}".strip()
@@ -209,7 +216,13 @@ def process_curated_candidates():
 
                     interview_data = None
                     if alpharun_job_id:
-                        interview_id = fetch_candidate_interview_id(slug)
+                        # OPTIMIZATION: Pass pre-fetched data to avoid redundant API calls
+                        interview_id = fetch_candidate_interview_id(
+                            slug,
+                            job_slug,
+                            candidate_data=full_candidate_data,
+                            job_specific_fields=job_specific_fields
+                        )
                         if interview_id:
                             interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
 
