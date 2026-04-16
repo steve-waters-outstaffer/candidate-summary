@@ -307,7 +307,13 @@ def generate_summary():
 
         # 2. If we have an Alpharun Job ID, fetch the interview using the new fallback logic
         if alpharun_job_id:
-            interview_id = fetch_candidate_interview_id(candidate_slug, job_slug)
+            # OPTIMIZATION: Pass pre-fetched data to avoid redundant API calls
+            interview_id = fetch_candidate_interview_id(
+                candidate_slug,
+                job_slug,
+                candidate_data=candidate_data,
+                job_specific_fields=job_specific_fields
+            )
             if interview_id:
                 interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
         # --- END AI INTERVIEW LOGIC ---
