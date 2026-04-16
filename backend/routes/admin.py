@@ -33,8 +33,8 @@ def list_prompts():
         log.info("admin.list_prompts.success", count=len(prompts))
         return jsonify({'success': True, 'prompts': prompts}), 200
     except Exception as e:
-        log.error("admin.list_prompts.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        log.error("admin.list_prompts.error", error=str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'An internal server error occurred'}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['GET'])
 @require_auth
@@ -49,8 +49,8 @@ def get_prompt(prompt_id):
         log.info("admin.get_prompt.success", prompt_id=prompt_id)
         return jsonify({'success': True, 'prompt': prompt}), 200
     except Exception as e:
-        log.error("admin.get_prompt.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        log.error("admin.get_prompt.error", error=str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'An internal server error occurred'}), 500
 
 @admin_bp.route('/api/admin/prompts', methods=['POST'])
 @require_auth
@@ -83,8 +83,8 @@ def create_prompt():
         log.info("admin.create_prompt.success", slug=slug)
         return jsonify({'success': True, 'prompt_id': slug}), 201
     except Exception as e:
-        log.error("admin.create_prompt.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        log.error("admin.create_prompt.error", error=str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'An internal server error occurred'}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['PUT'])
 @require_auth
@@ -111,8 +111,8 @@ def update_prompt(prompt_id):
         log.info("admin.update_prompt.success", prompt_id=prompt_id)
         return jsonify({'success': True}), 200
     except Exception as e:
-        log.error("admin.update_prompt.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        log.error("admin.update_prompt.error", error=str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'An internal server error occurred'}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>', methods=['DELETE'])
 @require_auth
@@ -129,8 +129,8 @@ def delete_prompt(prompt_id):
         log.info("admin.delete_prompt.success", prompt_id=prompt_id)
         return jsonify({'success': True}), 200
     except Exception as e:
-        log.error("admin.delete_prompt.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        log.error("admin.delete_prompt.error", error=str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'An internal server error occurred'}), 500
 
 @admin_bp.route('/api/admin/prompts/<prompt_id>/set-default', methods=['POST'])
 @require_auth
@@ -150,8 +150,8 @@ def set_default_prompt(prompt_id):
         log.info("admin.set_default.success", prompt_id=prompt_id, category=category)
         return jsonify({'success': True}), 200
     except Exception as e:
-        log.error("admin.set_default.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        log.error("admin.set_default.error", error=str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'An internal server error occurred'}), 500
 
 
 
@@ -190,8 +190,8 @@ def get_webhook_config():
         return jsonify(data), 200
 
     except Exception as e:
-        log.error("admin.get_webhook_config.error", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("admin.get_webhook_config.error", error=str(e), exc_info=True)
+        return jsonify({'error': 'An internal server error occurred'}), 500
 
 
 @admin_bp.route('/api/webhook-config', methods=['PUT'])
@@ -229,8 +229,8 @@ def update_webhook_config():
         return jsonify({'success': True, 'message': 'Configuration updated'}), 200
 
     except Exception as e:
-        log.error("admin.update_webhook_config.error", error=str(e))
-        return jsonify({'error': str(e)}), 500
+        log.error("admin.update_webhook_config.error", error=str(e), exc_info=True)
+        return jsonify({'error': 'An internal server error occurred'}), 500
 
 
 
@@ -273,5 +273,5 @@ def get_summary_runs():
         return jsonify({'success': True, 'runs': runs}), 200
 
     except Exception as e:
-        log.error("admin.get_summary_runs.error", error=str(e))
-        return jsonify({'success': False, 'error': str(e)}), 500
+        log.error("admin.get_summary_runs.error", error=str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'An internal server error occurred'}), 500
