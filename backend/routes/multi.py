@@ -5,6 +5,7 @@ import re
 from flask import Blueprint, request, jsonify, current_app
 import structlog
 from config.prompts import build_full_prompt
+from helpers.auth_helpers import require_auth
 from helpers.recruitcrm_helpers import (
     fetch_recruitcrm_job,
     fetch_recruitcrm_assigned_candidates,
@@ -24,6 +25,7 @@ log = structlog.get_logger()
 multi_bp = Blueprint('multi_api', __name__)
 
 @multi_bp.route('/generate-multiple-candidates', methods=['POST'])
+@require_auth
 def generate_multiple_candidates():
     """Generates content for multiple candidates."""
     log.info("multi.generate_multiple_candidates.hit")
@@ -151,6 +153,7 @@ def generate_multiple_candidates():
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 @multi_bp.route('/process-curated-candidates', methods=['POST'])
+@require_auth
 def process_curated_candidates():
     """Processes a curated list of candidates for a specific job."""
     log.info("multi.process_curated_candidates.hit")

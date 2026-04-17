@@ -73,7 +73,7 @@ const WebhookConfig = () => {
 
     const loadPrompts = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/prompts?type=summary`);
+            const response = await authFetch(`/api/prompts?type=summary`);
             if (!response.ok) throw new Error('Failed to load prompts');
             const data = await response.json();
             setPrompts(data);

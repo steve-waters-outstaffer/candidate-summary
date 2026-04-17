@@ -41,6 +41,10 @@ try:
     )
     log.info("routes.single: Successfully imported from helpers.ai_helpers.")
 
+    log.info("routes.single: Importing from helpers.auth_helpers...")
+    from helpers.auth_helpers import require_auth
+    log.info("routes.single: Successfully imported from helpers.auth_helpers.")
+
     log.info("routes.single: Importing from helpers.gmail_helpers...")
     from helpers.gmail_helpers import create_gmail_draft
     log.info("routes.single: Successfully imported from helpers.gmail_helpers.")
@@ -57,6 +61,7 @@ log.info("routes.single: All imports successful.")
 single_bp = Blueprint('single_api', __name__)
 
 @single_bp.route('/prompts', methods=['GET'])
+@require_auth
 def list_prompts():
     """Returns a list of available prompt configurations."""
     log.info("single.prompts.hit")
@@ -70,6 +75,7 @@ def list_prompts():
         return jsonify({'error': 'Could not retrieve prompt list from server'}), 500
 
 @single_bp.route('/test-candidate', methods=['POST'])
+@require_auth
 def test_candidate():
     """Tests the connection to the RecruitCRM candidate API."""
     log.info("single.test_candidate.hit")
@@ -97,6 +103,7 @@ def test_candidate():
     return jsonify({'error': 'Failed to fetch candidate data'}), 404
 
 @single_bp.route('/test-job', methods=['POST'])
+@require_auth
 def test_job():
     """Tests the connection to the RecruitCRM job API."""
     log.info("single.test_job.hit")
@@ -122,6 +129,7 @@ def test_job():
     return jsonify({'error': 'Failed to fetch job data'}), 404
 
 @single_bp.route('/test-interview', methods=['POST'])
+@require_auth
 def test_interview():
     """Tests the connection to the AlphaRun interview API."""
     log.info("single.test_interview.hit")
@@ -166,6 +174,7 @@ def test_interview():
 
 
 @single_bp.route('/test-quil', methods=['POST'])
+@require_auth
 def test_quil():
     """Tests Quil note detection and matching for a candidate and job."""
     log.info("single.test_quil.hit")
@@ -237,6 +246,7 @@ def test_quil():
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
 @single_bp.route('/test-resume', methods=['POST'])
+@require_auth
 def test_resume():
     """Checks for the presence of a resume in the candidate data."""
     log.info("single.test_resume.hit")
@@ -260,6 +270,7 @@ def test_resume():
     return jsonify({'error': 'Failed to fetch candidate data to check for resume'}), 404
 
 @single_bp.route('/generate-summary', methods=['POST'])
+@require_auth
 def generate_summary():
     """Generate candidate summary, optionally including Fireflies and interview data."""
     log.info("single.generate_summary.hit")
@@ -401,6 +412,7 @@ def generate_summary():
         return jsonify({'error': str(e)}), 500
 
 @single_bp.route('/push-to-recruitcrm', methods=['POST'])
+@require_auth
 def push_to_recruitcrm():
     """Push generated summary to RecruitCRM candidate record"""
     log.info("single.push_to_recruitcrm.hit")
@@ -439,6 +451,7 @@ def push_to_recruitcrm():
 
 # --- NEW SIMPLIFIED ROUTE ---
 @single_bp.route('/create-note', methods=['POST'])
+@require_auth
 def create_note():
     """
     Creates a new note in RecruitCRM using slugs.
@@ -472,6 +485,7 @@ def create_note():
 
 # --- ADD THIS NEW ROUTE ---
 @single_bp.route('/move-stage', methods=['POST'])
+@require_auth
 def move_stage():
     """
     Moves a candidate to the "AI Summary - Generated" stage.
@@ -512,6 +526,7 @@ def move_stage():
 
 
 @single_bp.route('/create-gmail-draft', methods=['POST'])
+@require_auth
 def create_gmail_draft_route():
     """Create a Gmail draft from generated email content"""
     log.info("single.create_gmail_draft.hit")
@@ -559,6 +574,7 @@ def create_gmail_draft_route():
         return jsonify({'error': str(e)}), 500
 
 @single_bp.route('/log-feedback', methods=['POST'])
+@require_auth
 def log_feedback():
     """Receives and logs user feedback on a generated summary to Firestore."""
     log.info("single.log_feedback.hit")
@@ -586,6 +602,7 @@ def log_feedback():
 
 # --- ADD THIS NEW ROUTE ---
 @single_bp.route('/track-event', methods=['POST'])
+@require_auth
 def track_event():
     """
     Receives an event from the worker and tracks it using the

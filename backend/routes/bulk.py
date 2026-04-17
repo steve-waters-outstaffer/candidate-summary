@@ -23,6 +23,7 @@ from helpers.ai_helpers import (
 )
 from helpers.gmail_helpers import create_gmail_draft
 from config.prompts import build_full_prompt
+from helpers.auth_helpers import require_auth
 # In-memory job store. For a production environment, you might replace this
 # with a more persistent store like Redis or Firestore.
 BULK_JOBS = {}
@@ -193,6 +194,7 @@ def process_candidates_background(job_id, flask_app):
             job_details['error'] = str(e)
 
 @bulk_bp.route('/job-stages-with-counts/<job_slug>', methods=['GET'])
+@require_auth
 def get_job_stages_with_counts(job_slug):
     """Fetches job name, and all candidates for a job, counts them by stage, and returns a list of stages that have at least one candidate."""
     log.info("bulk.get_job_stages_with_counts.called", job_slug=job_slug)
@@ -236,6 +238,7 @@ def get_job_stages_with_counts(job_slug):
     return jsonify({'job_name': job_name, 'stages': stages_with_counts}), 200
 
 @bulk_bp.route('/candidates-in-stage/<job_slug>/<stage_id>', methods=['GET'])
+@require_auth
 def get_candidates_in_stage(job_slug, stage_id):
     """Fetches a list of candidates in a specific stage for a job."""
     log.info("bulk.get_candidates_in_stage.called", job_slug=job_slug, stage_id=stage_id)
@@ -253,6 +256,7 @@ def get_candidates_in_stage(job_slug, stage_id):
     return jsonify(formatted_candidates), 200
 
 @bulk_bp.route('/bulk-process-job', methods=['POST'])
+@require_auth
 def start_bulk_process_job():
     """
     Starts an asynchronous job to process summaries for multiple candidates.
@@ -301,6 +305,7 @@ def start_bulk_process_job():
     return jsonify({'message': 'Job started', 'job_id': job_id}), 202
 
 @bulk_bp.route('/bulk-job-status/<job_id>', methods=['GET'])
+@require_auth
 def get_bulk_job_status(job_id):
     """Pollable endpoint to get the status and results of a bulk processing job."""
     log.info("bulk.get_bulk_job_status.called", job_id=job_id)
@@ -321,6 +326,7 @@ def get_bulk_job_status(job_id):
     return jsonify(response_data), 200
 
 @bulk_bp.route('/generate-bulk-email', methods=['POST'])
+@require_auth
 def generate_bulk_email():
     """Generates the final multi-candidate email from completed summaries."""
     data = request.get_json()
@@ -391,6 +397,7 @@ def generate_bulk_email():
         return jsonify({'error': str(e)}), 500
 
 @bulk_bp.route('/create-bulk-gmail-draft', methods=['POST'])
+@require_auth
 def create_bulk_gmail_draft():
     """Create a Gmail draft from generated bulk email content"""
     log.info("bulk.create_bulk_gmail_draft.hit")

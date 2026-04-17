@@ -33,6 +33,7 @@ import {
     ContentCopy
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { authFetch } from '../services/apiService';
 
 // --- Placeholder values for theme ---
 const CustomColors = {
@@ -95,10 +96,9 @@ const CandidateSummaryGenerator = () => {
 
     useEffect(() => {
         const fetchPrompts = async () => {
-            if (!API_BASE_URL) return;
             try {
                 // Fetch summary prompts
-                const summaryResponse = await fetch(`${API_BASE_URL}/api/prompts?type=summary`);
+                const summaryResponse = await authFetch('/api/prompts?type=summary');
                 if (!summaryResponse.ok) throw new Error('Failed to fetch summary prompts');
                 const summaryData = await summaryResponse.json();
                 setPrompts(summaryData);
@@ -108,7 +108,7 @@ const CandidateSummaryGenerator = () => {
                 }
                 
                 // Fetch email prompts
-                const emailResponse = await fetch(`${API_BASE_URL}/api/prompts?type=email`);
+                const emailResponse = await authFetch('/api/prompts?type=email');
                 if (!emailResponse.ok) throw new Error('Failed to fetch email prompts');
                 const emailData = await emailResponse.json();
                 setEmailPrompts(emailData);
@@ -120,7 +120,7 @@ const CandidateSummaryGenerator = () => {
             }
         };
         fetchPrompts();
-    }, [API_BASE_URL]);
+    }, []);
 
     useEffect(() => {
         if (apiStatus.candidate.status === 'success' && formData.candidate_slug) {
@@ -140,12 +140,10 @@ const CandidateSummaryGenerator = () => {
     }, [apiStatus.interview.data]);
 
     const testApi = async (apiType, payload) => {
-        if (!API_BASE_URL) return;
         setApiStatus(prev => ({ ...prev, [apiType]: { status: 'loading', message: 'Confirming...', data: null } }));
         try {
-            const response = await fetch(`${API_BASE_URL}/api/test-${apiType}`, {
+            const response = await authFetch(`/api/test-${apiType}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
             const data = await response.json();
@@ -243,8 +241,6 @@ const CandidateSummaryGenerator = () => {
     };
 
     const generateSummary = async () => {
-        if (!API_BASE_URL) return;
-
         const baseApisSuccess = apiStatus.candidate.status === 'success' && apiStatus.job.status === 'success';
 
         if (!baseApisSuccess) {
@@ -273,18 +269,16 @@ const CandidateSummaryGenerator = () => {
 
             // Generate summary (and optionally email) in parallel
             const requests = [
-                fetch(`${API_BASE_URL}/api/generate-summary`, {
+                authFetch('/api/generate-summary', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ...basePayload, prompt_type: selectedPrompt })
                 })
             ];
 
             if (createEmailDraft) {
                 requests.push(
-                    fetch(`${API_BASE_URL}/api/generate-summary`, {
+                    authFetch('/api/generate-summary', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ ...basePayload, prompt_type: selectedEmailPrompt })
                     })
                 );
@@ -320,8 +314,6 @@ const CandidateSummaryGenerator = () => {
     };
 
     const pushToRecruitCRM = async () => {
-        if (!API_BASE_URL) return;
-
         if (!generatedHtml || !formData.candidate_slug) {
             showAlert('error', 'No summary to push or missing candidate information');
             return;
@@ -329,9 +321,8 @@ const CandidateSummaryGenerator = () => {
 
         setPushing(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/push-to-recruitcrm`, {
+            const response = await authFetch('/api/push-to-recruitcrm', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     candidate_slug: formData.candidate_slug,
                     html_summary: generatedHtml
@@ -353,8 +344,6 @@ const CandidateSummaryGenerator = () => {
     };
 
     const createGmailDraft = async () => {
-        if (!API_BASE_URL) return;
-
         if (!generatedEmailHtml) {
             showAlert('error', 'No email content to create draft');
             return;
@@ -389,9 +378,8 @@ const CandidateSummaryGenerator = () => {
         setCreatingDraft(true);
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/create-gmail-draft`, {
+            const response = await authFetch('/api/create-gmail-draft', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     access_token: accessToken,
                     subject: subject,
@@ -428,7 +416,6 @@ const CandidateSummaryGenerator = () => {
     };
 
     const handleFeedbackSubmit = async (rating) => {
-        if (!API_BASE_URL) return;
         const payload = {
             rating: rating,
             comments: feedbackComment,
@@ -438,9 +425,8 @@ const CandidateSummaryGenerator = () => {
             job_slug: formData.job_slug
         };
         try {
-            const response = await fetch(`${API_BASE_URL}/api/log-feedback`, {
+            const response = await authFetch('/api/log-feedback', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
 
