@@ -8,6 +8,7 @@ log = structlog.get_logger()
 log.info("routes.floating: Top of file, starting imports.")
 
 try:
+    from helpers.auth_helpers import require_auth
     from helpers.recruitcrm_helpers import fetch_recruitcrm_candidate, fetch_candidate_notes, parse_alpharun_interview_from_notes
     from helpers.ai_helpers import upload_resume_to_gemini, generate_floating_html_summary
     from helpers.pdf_helpers import generate_pdf_from_html
@@ -21,6 +22,7 @@ floating_bp = Blueprint('floating_api', __name__)
 
 
 @floating_bp.route('/floating/test-candidate', methods=['POST'])
+@require_auth
 def floating_test_candidate():
     """Validates a candidate slug and returns the candidate's name."""
     log.info("floating.test_candidate.hit")
@@ -42,6 +44,7 @@ def floating_test_candidate():
 
 
 @floating_bp.route('/floating/test-resume', methods=['POST'])
+@require_auth
 def floating_test_resume():
     """Checks whether the candidate has a resume on file."""
     log.info("floating.test_resume.hit")
@@ -65,6 +68,7 @@ def floating_test_resume():
 
 
 @floating_bp.route('/floating/test-interview', methods=['POST'])
+@require_auth
 def floating_test_interview():
     """Checks whether the candidate has an AI Interview Note on file."""
     log.info("floating.test_interview.hit")
@@ -86,6 +90,7 @@ def floating_test_interview():
 
 
 @floating_bp.route('/floating/generate-summary', methods=['POST'])
+@require_auth
 def floating_generate_summary():
     """Generates an anonymous floating candidate summary HTML."""
     log.info("floating.generate_summary.hit")
@@ -130,6 +135,7 @@ def floating_generate_summary():
 
 
 @floating_bp.route('/floating/generate-pdf', methods=['POST'])
+@require_auth
 def floating_generate_pdf():
     """Converts the generated HTML summary to a downloadable PDF."""
     log.info("floating.generate_pdf.hit")

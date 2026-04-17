@@ -1,3 +1,4 @@
+import { authFetch } from '../services/apiService';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box, Card, CardContent, TextField, Button, Typography, Alert, CircularProgress,
@@ -52,7 +53,7 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
         const fetchPrompts = async (category) => {
             if (!API_BASE_URL) return;
             try {
-                const response = await fetch(`${API_BASE_URL}/api/prompts?category=${category}`);
+                const response = await authFetch(`/api/prompts?category=${category}`);
                 if (response.ok) {
                     const prompts = await response.json();
                     setAvailablePrompts(prev => ({ ...prev, [category]: prompts }));
@@ -93,7 +94,7 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
         const jobSlug = slugMatch[1];
         setStagesLoading(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/job-stages-with-counts/${jobSlug}`);
+            const response = await authFetch(`/api/job-stages-with-counts/${jobSlug}`);
             if (response.ok) {
                 const data = await response.json();
                 setJobName(data.job_name || '');
@@ -134,7 +135,7 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
         setCandidatesLoading(true);
         const jobSlug = jobUrl.match(/\/job(?:s)?\/([a-zA-Z0-9]+)/)[1];
         try {
-            const response = await fetch(`${API_BASE_URL}/api/candidates-in-stage/${jobSlug}/${stageId}`);
+            const response = await authFetch(`/api/candidates-in-stage/${jobSlug}/${stageId}`);
             if (response.ok) {
                 const candidates = await response.json();
                 setCandidateList(candidates);
@@ -170,9 +171,8 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
         setJobId(null); // Using prop function
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/bulk-process-job`, {
+            const response = await authFetch(`/api/bulk-process-job`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     job_url: jobUrl,
                     single_candidate_prompt: singleCandidatePrompt,
@@ -196,7 +196,7 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
     const pollJobStatus = (id) => {
         const interval = setInterval(async () => {
             try {
-                const response = await fetch(`${API_BASE_URL}/api/bulk-job-status/${id}`);
+                const response = await authFetch(`/api/bulk-job-status/${id}`);
                 const data = await response.json();
 
                 if (response.ok) {
@@ -235,9 +235,8 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
 
         setEmailLoading(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/generate-bulk-email`, {
+            const response = await authFetch(`/api/generate-bulk-email`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     job_id: jobId,
                     multi_candidate_prompt: multiCandidatePrompt,
@@ -293,9 +292,8 @@ const BulkGenerator = ({ jobId, setJobId, jobStatus, setJobStatus }) => {
 
         setCreatingDraft(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/create-bulk-gmail-draft`, {
+            const response = await authFetch(`/api/create-bulk-gmail-draft`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     access_token: accessToken,
                     subject: subject,

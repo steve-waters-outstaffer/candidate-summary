@@ -1,3 +1,4 @@
+import { authFetch } from '../services/apiService';
 import React, { useState, useEffect } from 'react';
 import {
     Box,
@@ -84,7 +85,7 @@ const MultipleCandidatesGenerator = () => {
     const fetchAvailablePrompts = async (category, setter, defaultSetter) => {
         if (!API_BASE_URL) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/prompts?category=${category}`);
+            const response = await authFetch(`/api/prompts?category=${category}`);
             if (response.ok) {
                 const prompts = await response.json();
                 setter(prompts);
@@ -136,9 +137,8 @@ const MultipleCandidatesGenerator = () => {
     const validateJob = async (jobSlug) => {
         setJobStatus({ status: 'loading', message: 'Confirming job...', data: { slug: jobSlug } });
         try {
-            const response = await fetch(`${API_BASE_URL}/api/test-job`, {
+            const response = await authFetch(`/api/test-job`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ job_slug: jobSlug })
             });
 
@@ -168,9 +168,8 @@ const MultipleCandidatesGenerator = () => {
 
         try {
             const slug = url.split('/').pop();
-            const response = await fetch(`${API_BASE_URL}/api/test-candidate`, {
+            const response = await authFetch(`/api/test-candidate`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ candidate_slug: slug })
             });
 
@@ -196,9 +195,8 @@ const MultipleCandidatesGenerator = () => {
             [index]: { ...prev[index], resume: { status: 'loading', message: 'Checking resume...', data: null } }
         }));
         try {
-            const response = await fetch(`${API_BASE_URL}/api/test-resume`, {
+            const response = await authFetch(`/api/test-resume`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ candidate_slug: candidateSlug })
             });
             const data = await response.json();
@@ -218,9 +216,8 @@ const MultipleCandidatesGenerator = () => {
             [index]: { ...prev[index], interview: { status: 'loading', message: 'Checking interview...', data: null } }
         }));
         try {
-            const response = await fetch(`${API_BASE_URL}/api/test-interview`, {
+            const response = await authFetch(`/api/test-interview`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ interview_id: interviewId, alpharun_job_id: alpharunJobId })
             });
             const data = await response.json();
@@ -256,9 +253,8 @@ const MultipleCandidatesGenerator = () => {
         const candidateSlugs = validUrls.map(url => url.split('/').pop());
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/process-curated-candidates`, {
+            const response = await authFetch(`/api/process-curated-candidates`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     job_slug: jobSlug,
                     candidate_slugs: candidateSlugs,
@@ -294,9 +290,8 @@ const MultipleCandidatesGenerator = () => {
     const handlePushToCrm = async (candidateSlug, summaryHtml) => {
         setPushStatuses(prev => ({ ...prev, [candidateSlug]: { status: 'loading' } }));
         try {
-            const response = await fetch(`${API_BASE_URL}/api/push-to-recruitcrm`, {
+            const response = await authFetch(`/api/push-to-recruitcrm`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ candidate_slug: candidateSlug, html_summary: summaryHtml }),
             });
             if (response.ok) {

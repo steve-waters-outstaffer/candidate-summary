@@ -1,3 +1,4 @@
+import { authFetch } from '../services/apiService';
 import React, { useState } from 'react';
 import {
     Box,
@@ -96,21 +97,18 @@ const FloatingSummaryGenerator = () => {
         });
 
         const [candidateRes, resumeRes, interviewRes] = await Promise.all([
-            fetch(`${API_BASE_URL}/api/floating/test-candidate`, {
+            authFetch(`/api/floating/test-candidate`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ candidate_slug: slug })
             }).then(r => r.json()).catch(() => ({ error: 'Network error' })),
 
-            fetch(`${API_BASE_URL}/api/floating/test-resume`, {
+            authFetch(`/api/floating/test-resume`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ candidate_slug: slug })
             }).then(r => r.json()).catch(() => ({ error: 'Network error' })),
 
-            fetch(`${API_BASE_URL}/api/floating/test-interview`, {
+            authFetch(`/api/floating/test-interview`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ candidate_slug: slug })
             }).then(r => r.json()).catch(() => ({ error: 'Network error' }))
         ]);
@@ -141,9 +139,8 @@ const FloatingSummaryGenerator = () => {
         setAlert({ show: false, type: 'info', message: '' });
 
         try {
-            const res = await fetch(`${API_BASE_URL}/api/floating/generate-summary`, {
+            const res = await authFetch(`/api/floating/generate-summary`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     candidate_slug: candidateSlug,
                     additional_context: additionalContext,
@@ -170,9 +167,8 @@ const FloatingSummaryGenerator = () => {
         if (!generatedHtml) return;
         setDownloading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/floating/generate-pdf`, {
+            const res = await authFetch(`/api/floating/generate-pdf`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     html_summary: generatedHtml,
                     candidate_name: apiStatus.candidate.data?.candidate_name || 'Candidate'
@@ -202,9 +198,8 @@ const FloatingSummaryGenerator = () => {
     const handleFeedbackSubmit = async (rating) => {
         setFeedbackSubmitted(true);
         // Fire-and-forget — same as CandidateSummaryGenerator
-        fetch(`${API_BASE_URL}/api/feedback`, {
+        authFetch(`/api/feedback`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 rating,
                 comment: feedbackComment,
