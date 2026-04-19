@@ -2,6 +2,7 @@
 
 import datetime
 import re
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, request, jsonify, current_app
 import structlog
 import requests
@@ -269,7 +270,9 @@ def generate_summary():
         job_slug = data.get('job_slug')
         additional_context = data.get('additional_context', '')
         prompt_type = data.get('prompt_type', 'recruitment.detailed')
-        client = current_app.client
+        use_quil = data.get('use_quil', False)
+        flask_app = current_app._get_current_object()
+        client = flask_app.client
 
         # Model name can be overridden via config (Firestore-driven, no redeploy needed)
         gemini_summary_model = data.get('gemini_summary_model', 'gemini-3.1-pro-preview')
@@ -278,15 +281,27 @@ def generate_summary():
         if not all([candidate_slug, job_slug]):
             return jsonify({'error': 'Missing required RecruitCRM fields'}), 400
 
-        candidate_data = fetch_recruitcrm_candidate(candidate_slug)
-        job_data = fetch_recruitcrm_job(job_slug, include_custom_fields=True) # Ensure custom fields are included
+        # Parallelize initial data fetching
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            future_candidate = executor.submit(fetch_recruitcrm_candidate, candidate_slug)
+            future_job = executor.submit(fetch_recruitcrm_job, job_slug, include_custom_fields=True)
+            future_job_fields = executor.submit(fetch_recruitcrm_candidate_job_specific_fields, candidate_slug, job_slug)
+
+            # Fetch notes only if Quil is requested
+            future_notes = None
+            if use_quil:
+                future_notes = executor.submit(fetch_candidate_notes, candidate_slug)
+
+            candidate_data = future_candidate.result()
+            job_data = future_job.result()
+            job_specific_fields = future_job_fields.result()
+            candidate_notes = future_notes.result() if future_notes else None
 
         if not candidate_data or not job_data:
             missing = [name for name, d in [("candidate", candidate_data), ("job", job_data)] if not d]
             return jsonify({'error': f'Failed to fetch data from: {", ".join(missing)}'}), 500
 
         # Combine candidate's general custom fields with job-specific ones
-        job_specific_fields = fetch_recruitcrm_candidate_job_specific_fields(candidate_slug, job_slug)
         if candidate_data and job_specific_fields:
             candidate_details = candidate_data.get('data', candidate_data)
             if 'custom_fields' in candidate_details:
@@ -294,58 +309,74 @@ def generate_summary():
             else:
                 candidate_details['custom_fields'] = list(job_specific_fields.values())
 
-        # --- AI INTERVIEW LOGIC ---
-        interview_data = None
-        alpharun_job_id = None
-
-        # 1. Get Alpharun Job ID from the job's custom fields
+        # --- PREPARE FOR SECOND WAVE OF PARALLEL FETCHING ---
         job_details = job_data.get('data', job_data)
+        alpharun_job_id = None
         for field in job_details.get('custom_fields', []):
             if isinstance(field, dict) and field.get('field_name') == 'AI Job ID':
                 alpharun_job_id = field.get('value')
                 break
 
-        # 2. If we have an Alpharun Job ID, fetch the interview using the new fallback logic
-        if alpharun_job_id:
-            interview_id = fetch_candidate_interview_id(candidate_slug, job_slug)
-            if interview_id:
-                interview_data = fetch_alpharun_interview(alpharun_job_id, interview_id)
-        # --- END AI INTERVIEW LOGIC ---
-
-        gemini_resume_file = None
+        resume_info = None
         if candidate_data:
             candidate_details = candidate_data.get('data', candidate_data)
             resume_info = candidate_details.get('resume')
-            if resume_info:
-                gemini_resume_file = upload_resume_to_gemini(resume_info, client)
 
-        # --- QUIL INTERVIEW LOGIC ---
-        quil_data = None
-        use_quil = data.get('use_quil', False)
-        if use_quil and candidate_slug and job_slug:
-            log.info("single.generate_summary.fetching_quil", 
-                     candidate_slug=candidate_slug, 
-                     job_slug=job_slug)
-            try:
-                candidate_notes = fetch_candidate_notes(candidate_slug)
+        # Use ThreadPoolExecutor for second wave (Interviews & Resume Upload)
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # 1. AI Interview Fetching
+            future_interview = None
+            if alpharun_job_id:
+                # We can now pass pre-fetched data to avoid redundant calls
+                interview_id = fetch_candidate_interview_id(
+                    candidate_slug,
+                    job_slug,
+                    candidate_data=candidate_data,
+                    job_specific_fields=job_specific_fields
+                )
+                if interview_id:
+                    future_interview = executor.submit(fetch_alpharun_interview, alpharun_job_id, interview_id)
+
+            # 2. Resume Upload to Gemini
+            future_resume_upload = None
+            if resume_info:
+                future_resume_upload = executor.submit(upload_resume_to_gemini, resume_info, client)
+
+            # 3. Quil Matching (if applicable)
+            future_quil_match = None
+            if use_quil and candidate_notes:
                 job_title = job_details.get('name', 'Unknown Job')
                 job_description = job_details.get('description', '')
                 
-                quil_data = get_corecruit_interview_for_job(
-                    candidate_notes,
-                    job_slug,
-                    job_title,
-                    job_description,
-                    model=gemini_matching_model
-                )
+                # Wrap the Quil helper to catch exceptions and maintain resilience
+                def quil_task():
+                    try:
+                        return get_corecruit_interview_for_job(
+                            candidate_notes,
+                            job_slug,
+                            job_title,
+                            job_description,
+                            model=gemini_matching_model
+                        )
+                    except Exception as e:
+                        log.error("single.generate_summary.quil_error", error=str(e))
+                        return None
+
+                future_quil_match = executor.submit(quil_task)
+
+            # Collect results
+            # Note: The workers themselves should handle internal errors gracefully.
+            # We use result() which will raise any uncaught exceptions from the worker.
+            interview_data = future_interview.result() if future_interview else None
+            gemini_resume_file = future_resume_upload.result() if future_resume_upload else None
+            quil_data = future_quil_match.result() if future_quil_match else None
                 
-                if quil_data:
-                    log.info("single.generate_summary.quil_found", 
-                             has_summary=bool(quil_data.get('summary_html')))
-                else:
-                    log.warning("single.generate_summary.quil_not_found")
-            except Exception as e:
-                log.error("single.generate_summary.quil_error", error=str(e))
+            if quil_data:
+                log.info("single.generate_summary.quil_found",
+                         has_summary=bool(quil_data.get('summary_html')))
+            else:
+                log.warning("single.generate_summary.quil_not_found")
+
         # --- END QUIL INTERVIEW LOGIC ---
 
         # Track which sources will be sent to the prompt/generation step
